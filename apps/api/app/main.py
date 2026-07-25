@@ -80,6 +80,7 @@ def _register_routers(app: FastAPI) -> None:
     from app.modules.identity.router import router as identity_router
     from app.modules.income_report.router import router as income_report_router
     from app.modules.invoicing.router import router as invoicing_router
+    from app.modules.mobile.router import router as mobile_router
     from app.modules.payments.router import router as payments_router
     from app.modules.purchases.router import router as purchases_router
     from app.modules.rbac.router import router as rbac_router
@@ -112,6 +113,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(stores_router, prefix=prefix)
     app.include_router(submissions_router, prefix=prefix)
     app.include_router(deadlines_router, prefix=prefix)
+    app.include_router(mobile_router, prefix=prefix)
 
 
 app = create_app()

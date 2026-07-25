@@ -12,7 +12,12 @@ import pytest
 
 _DB_PATH = Path(tempfile.gettempdir()) / "aifos_test.db"
 _DOCS_DIR = Path(tempfile.gettempdir()) / "aifos_test_docs"
-os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH}"
+# По подразбиране SQLite (бързо, без зависимости). CI пуска СЪЩИТЕ тестове и срещу
+# PostgreSQL с TEST_DATABASE_URL — това е проверката, че кодът е съвместим с
+# production базата (типове, ограничения, транзакционен DDL).
+_TEST_DB_URL = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{_DB_PATH}"
+_USING_SQLITE = _TEST_DB_URL.startswith("sqlite")
+os.environ["DATABASE_URL"] = _TEST_DB_URL
 os.environ["AUTO_CREATE_TABLES"] = "true"
 os.environ["SECRET_KEY"] = "test-secret-key"
 os.environ["ENVIRONMENT"] = "test"
@@ -25,11 +30,13 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 @pytest.fixture(scope="session", autouse=True)
 def _fresh_database():
-    if _DB_PATH.exists():
+    # При PostgreSQL схемата се пресъздава от `client` фикстурата — тук няма файл
+    # за триене.
+    if _USING_SQLITE and _DB_PATH.exists():
         _DB_PATH.unlink()
     shutil.rmtree(_DOCS_DIR, ignore_errors=True)
     yield
-    if _DB_PATH.exists():
+    if _USING_SQLITE and _DB_PATH.exists():
         _DB_PATH.unlink()
     shutil.rmtree(_DOCS_DIR, ignore_errors=True)
 

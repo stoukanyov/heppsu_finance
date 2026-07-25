@@ -127,6 +127,24 @@ class Settings(BaseSettings):
         has_google = bool(self.GOOGLE_PLAY_BUCKET and self.GOOGLE_APPLICATION_CREDENTIALS)
         return "live" if (has_apple or has_google) else "stub"
 
+    # ---- Мобилен клиент ----
+    # Версията, под която приложението спира да работи. Проверката е на сървъра,
+    # за да може да се вдигне без ново издание в магазина — това е единственият
+    # начин да се извади от употреба клиент с намерен пробив в сигурността.
+    # Празно/„0.0.0“ = нищо не се блокира.
+    MOBILE_MIN_SUPPORTED_VERSION: str = "0.0.0"
+    # Последната публикувана версия — по-старите виждат ненатрапчива покана.
+    MOBILE_LATEST_VERSION: str = ""
+    MOBILE_IOS_STORE_URL: str = ""
+    MOBILE_ANDROID_STORE_URL: str = ""
+    # Обяснение, което се показва при блокиране (напр. „поправка в изчисляването на ДДС“).
+    MOBILE_UPDATE_MESSAGE: str = ""
+
+    # Приемане на отчети за сривове от мобилния клиент.
+    CRASH_REPORTING_ENABLED: bool = True
+    CRASH_REPORT_RATE_LIMIT: int = 20            # доклада...
+    CRASH_REPORT_RATE_WINDOW_SECONDS: int = 3600  # ...на час от един IP
+
     # Съхранение на документи
     DOCUMENT_STORAGE_DIR: str = "./storage/documents"
     MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024  # 25 MB

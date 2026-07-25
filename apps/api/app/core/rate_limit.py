@@ -151,8 +151,13 @@ class RateLimitGuard:
     def _key(self, subject: str) -> str:
         return f"{self._limiter.name}|{self.ip}|{subject.strip().lower()}"
 
-    def check(self, subject: str) -> None:
-        """Вдига 429 с `Retry-After`, ако прагът за IP+субект е изчерпан."""
+    def check(self, subject: str, *, detail: str | None = None) -> None:
+        """Вдига 429 с `Retry-After`, ако прагът за IP+субект е изчерпан.
+
+        `detail` позволява различен текст там, където ограничението не пази от
+        познаване на парола (напр. приемане на отчети за сривове) — иначе
+        клиентът получава съобщение за „неуспешни опити“, каквито няма.
+        """
         if not self.enabled:
             return
         retry_after = self._limiter.retry_after(self._key(subject))
@@ -168,12 +173,22 @@ class RateLimitGuard:
         )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
+            detail=detail
+            or (
                 "Твърде много неуспешни опити. Достъпът е временно ограничен — "
                 f"опитайте отново след около {minutes} мин."
             ),
             headers={"Retry-After": str(retry_after)},
         )
+
+    def register_event(self, subject: str) -> None:
+        """Отчита едно събитие, без да го нарича „неуспех“.
+
+        За крайни точки, при които всяко обръщение се брои (не само сгрешените).
+        """
+        if not self.enabled:
+            return
+        self._limiter.register(self._key(subject))
 
     def register_failure(self, subject: str, *, reason: str = "") -> None:
         """Отчита неуспешен опит и го логва за одит (без чувствителни данни)."""
