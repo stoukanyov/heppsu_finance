@@ -150,6 +150,45 @@ def update_status(
     return doc
 
 
+def confirm_posting(
+    db: Session, company_id: uuid.UUID, user_id: uuid.UUID, doc_id: uuid.UUID
+) -> tuple[Document, JournalEntry]:
+    """Потвърждава предложената статия: осчетоводява я и придвижва документа.
+
+    Човешкото решение в потока „AI предлага, човек потвърждава". Документът
+    минава PROPOSED → APPROVED → POSTED наведнъж, за да не увисне в междинно
+    състояние. Ако статията вече е осчетоводена, връща я без промяна
+    (идемпотентност при повторно натискане от клиента).
+    """
+    # Локален импорт: accounting е по-долен слой и не бива да се зарежда на
+    # ниво модул тук, за да остане зависимостта еднопосочна.
+    from app.modules.accounting import service as accounting_service
+    from app.modules.accounting.models import EntryStatus
+
+    doc = get_document(db, company_id, doc_id)
+    if doc.journal_entry_id is None:
+        raise _err(
+            "Документът няма предложена счетоводна статия за потвърждаване",
+            status.HTTP_409_CONFLICT,
+        )
+
+    entry = accounting_service.get_entry(db, company_id, doc.journal_entry_id)
+    if entry.status == EntryStatus.DRAFT:
+        entry = accounting_service.post_entry(db, company_id, entry.id, user_id)
+
+    # Придвижваме документа само напред и само по допустими преходи.
+    for target in (DocumentStatus.APPROVED, DocumentStatus.POSTED):
+        if doc.status == target:
+            continue
+        if target in ALLOWED_TRANSITIONS.get(doc.status, set()):
+            doc.status = target
+
+    db.commit()
+    db.refresh(doc)
+    db.refresh(entry)
+    return doc, entry
+
+
 def get_file(db: Session, company_id: uuid.UUID, doc_id: uuid.UUID) -> tuple[Document, bytes]:
     doc = get_document(db, company_id, doc_id)
     return doc, storage.read_file(doc.storage_path)

@@ -128,3 +128,26 @@ class VatPeriodClosing(UUIDMixin, TimestampMixin, Base):
     closed_by_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
+
+
+class VatPeriodRejection(UUIDMixin, TimestampMixin, Base):
+    """Отказ (връщане за корекция) на ДДС период от одобряващия.
+
+    Не заключва и не осчетоводява нищо — само отбелязва, че отчетът за периода е
+    върнат за корекция. Пази се историята (по един ред на всеки отказ); текущото
+    състояние е последният по време запис за периода. Приключването
+    (VatPeriodClosing) винаги има превес над отказа при определянето на статуса.
+    """
+
+    __tablename__ = "vat_period_rejections"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("companies.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    period_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("accounting_periods.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    rejected_by_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )

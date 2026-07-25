@@ -257,7 +257,9 @@ const ICON = {
   check:'M20 6 9 17l-5-5', download:'M12 3v12m0 0 4-4m-4 4-4-4M4 21h16', eye:'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6',
   more:'M12 12h.01M19 12h.01M5 12h.01', plus:'M12 5v14M5 12h14', logout:'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
   alert:'M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
-  spark:'M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1'
+  spark:'M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1',
+  apps:'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
+  globe:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M3 12h18M12 3c2.5 2.5 3.5 6 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-6-3.5-9s1-6.5 3.5-9'
 };
 function ic(name, cls){ return `<svg class="${cls||''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${ICON[name]||''}"/></svg>`; }
 
@@ -267,7 +269,7 @@ const NAV = [
     ['dashboard','Начало','home'], ['accounting','Счетоводство','book'], ['contacts','Контрагенти','users'],
   ]},
   {sec:'Продажби и покупки', items:[
-    ['invoices','Фактури','receipt'], ['purchases','Покупки','cart'], ['banking','Банки и каси','bank'], ['payments','Плащания','card'],
+    ['invoices','Фактури','receipt'], ['purchases','Покупки','cart'], ['banking','Банки и каси','bank'], ['payments','Плащания','card'], ['stores','Магазини','apps'],
   ]},
   {sec:'Данъци и отчети', items:[
     ['vat','ДДС / Декларация','percent'], ['income73','Справка чл.73','receipt'], ['reports','Отчети','chart'], ['analytics','AI Анализи','brain'],
@@ -380,7 +382,7 @@ document.getElementById('new-company').onclick=async()=>{ const name=prompt('И�
 /* ---------- router ---------- */
 let currentView='dashboard';
 const VIEWS={ dashboard:viewDashboard, accounting:viewAccounting, contacts:viewContacts, invoices:viewInvoices,
-  purchases:viewPurchases, banking:viewBanking, payments:viewPayments, vat:viewVat, income73:viewIncome73, reports:viewReports,
+  purchases:viewPurchases, banking:viewBanking, payments:viewPayments, stores:viewStores, vat:viewVat, income73:viewIncome73, reports:viewReports,
   analytics:viewAnalytics, documents:viewDocuments, team:viewTeam, audit:viewAudit };
 function navigate(view){
   currentView=view; location.hash=view;
@@ -676,6 +678,60 @@ async function viewPayments(main){
     try{ await api('/payments',{method:'POST',body}); toast('Подготвено'); viewPayments(main); }catch(e){ toast(e.message,true); } };
   main.querySelectorAll('.approve').forEach(b=>b.onclick=async()=>{ try{ await api(`/payments/${b.dataset.id}/approve`,{method:'POST'}); toast('Одобрено'); viewPayments(main); }catch(e){ toast(e.message,true); } });
   main.querySelectorAll('.reject').forEach(b=>b.onclick=async()=>{ const reason=prompt('Причина за отхвърляне:'); if(!reason) return; try{ await api(`/payments/${b.dataset.id}/reject`,{method:'POST',body:{reason}}); toast('Отхвърлено'); viewPayments(main); }catch(e){ toast(e.message,true); } });
+}
+
+/* ==================== МАГАЗИНИ (App Store / Google Play) ==================== */
+async function viewStores(main){
+  const now=new Date(); const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const from=iso(new Date(now.getFullYear(),now.getMonth()-2,1)), to=iso(now);
+  let st={}; try{ st=await api('/stores/status'); }catch{}
+  const modePill = st.provider==='live' ? '<span class="pill s-green">Live · свързан</span>' : '<span class="pill s-amber">Демо данни (stub)</span>';
+  main.innerHTML=pageH('Магазини · App Store / Google Play','Продажби, най-добри приложения и държави',modePill)+`
+    <div class="card" style="margin-bottom:16px;"><div class="row">
+      <div class="field"><label>Магазин</label><select id="s-plat"><option value="APP_STORE">App Store</option><option value="GOOGLE_PLAY">Google Play</option><option value="BOTH">И двата</option></select></div>
+      <div class="field"><label>От дата</label><input id="s-from" type="date" value="${from}"/></div>
+      <div class="field"><label>До дата</label><input id="s-to" type="date" value="${to}"/></div>
+      <button id="s-sync" class="primary">${ic('download')}Синхронизирай</button>
+      <div class="hint" style="align-self:center;">${st.provider==='live'?'Тегли реални данни от API-тата.':'Без конфигурирани ключове — показва демо данни. Добави APPLE_* / GOOGLE_* в средата за реални.'}</div>
+    </div></div>
+    <div id="s-body">${loading()}</div>`;
+  document.getElementById('s-sync').onclick=async()=>{
+    const plat=document.getElementById('s-plat').value, f=document.getElementById('s-from').value, t=document.getElementById('s-to').value;
+    const plats = plat==='BOTH'?['APP_STORE','GOOGLE_PLAY']:[plat];
+    document.getElementById('s-sync').disabled=true;
+    try{ let imp=0; for(const p of plats){ const r=await api(`/stores/${p}/sync?date_from=${f}&date_to=${t}`,{method:'POST'}); imp+=r.imported; } toast(`Синхронизирани ${imp} нови реда`); loadStores(); }
+    catch(e){ toast(e.message,true); } finally{ document.getElementById('s-sync').disabled=false; } };
+  const loadStores=async()=>{
+    const box=document.getElementById('s-body'); box.innerHTML=loading();
+    try{
+      const a=await api('/stores/analytics');
+      if(!a.total_units){ box.innerHTML=`<div class="card">${empty('Няма данни още. Натисни „Синхронизирай", за да заредиш продажби.')}</div>`; return; }
+      const cur=a.currency;
+      const kpi=(l,v,icon,cls)=>`<div class="card kpi"><div class="top"><div><div class="l">${l}</div><div class="v">${v}</div></div><div class="chip ${cls}">${ic(icon)}</div></div></div>`;
+      const barTable=(items,unit)=>{ const mx=Math.max(...items.map(i=>Number(i.proceeds)),1);
+        return `<table><tbody>${items.slice(0,8).map(i=>`<tr><td style="width:38%">${esc(i.key)}</td><td style="width:40%"><div class="bar"><span style="width:${Math.max(3,Number(i.proceeds)/mx*100)}%;background:var(--accent)"></span></div></td><td class="num">${fmt(i.proceeds)} ${cur}</td><td class="num muted">${fmt0(i.units)} ${unit}</td></tr>`).join('')}</tbody></table>`; };
+      const platItems=a.by_platform.map((p,i)=>({label:p.key,value:Number(p.proceeds),color:PALETTE[i]}));
+      const ptot=platItems.reduce((s,i)=>s+i.value,0)||1;
+      box.innerHTML=`
+        <div class="kpis" style="margin-bottom:16px;">
+          ${kpi('Общо приходи',fmt(a.total_proceeds)+' '+cur,'trend','c-green')}
+          ${kpi('Общо продажби',fmt0(a.total_units)+' бр.','apps','c-violet')}
+          ${kpi('Топ приложение',esc(a.top_app||'—'),'apps','c-blue')}
+          ${kpi('Топ държава',esc(a.top_country||'—'),'globe','c-teal')}
+        </div>
+        <div class="cols" style="margin-bottom:16px;">
+          <div class="card"><div class="card-t"><h3>Най-продавани приложения</h3></div>${barTable(a.by_app,'бр.')}</div>
+          <div class="card"><div class="card-t"><h3>По държави</h3></div>${barTable(a.by_country,'бр.')}</div>
+        </div>
+        <div class="cols">
+          <div class="card"><div class="card-t"><h3>App Store срещу Google Play</h3></div><div class="flex" style="gap:20px;align-items:center;">
+            <div style="position:relative;display:grid;place-items:center;">${donut(platItems,150)}<div style="position:absolute;text-align:center;"><div class="muted" style="font-size:11px;">Приходи</div><div style="font-weight:700;">${fmt0(ptot)}</div></div></div>
+            <div class="legend" style="flex:1;">${platItems.map(i=>`<div class="li"><span><span class="dot" style="background:${i.color}"></span>${esc(i.label)}</span><b>${Math.round(i.value/ptot*100)}%</b></div>`).join('')}</div></div></div>
+          <div class="card"><div class="card-t"><h3>По месеци</h3></div>${(() => { const mx=Math.max(...a.by_month.map(m=>Number(m.proceeds)),1); return `<div style="display:flex;align-items:flex-end;gap:10px;height:150px;padding-top:10px;">${a.by_month.map(m=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;"><div style="width:100%;background:var(--accent-soft);border-radius:6px 6px 0 0;height:${Math.max(4,Number(m.proceeds)/mx*100)}%"></div><div class="hint" style="margin-top:6px;">${esc(m.key.slice(2))}</div></div>`).join('')}</div>`; })()}</div>
+        </div>`;
+    }catch(e){ box.innerHTML=`<div class="card">${empty(e.message)}</div>`; }
+  };
+  loadStores();
 }
 
 /* ==================== ДДС / ДЕКЛАРАЦИЯ ==================== */

@@ -5,7 +5,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.modules.companies.models import Company, CompanyRole, Membership
-from app.modules.companies.schemas import CompanyCreate
+from app.modules.companies.schemas import CompanyCreate, CompanyUpdate
+
+# Реквизити, които се задават/обновяват свободно (без ключовите идентификатори).
+_DETAIL_FIELDS = (
+    "name_latin", "legal_form", "address_city", "address_postcode", "address_line",
+    "manager_name", "owner_name", "phone", "email", "activity",
+    "vat_registration_date", "incorporation_date", "share_capital",
+)
 
 
 def create_company(db: Session, data: CompanyCreate, owner_id: uuid.UUID) -> tuple[Company, Membership]:
@@ -17,6 +24,7 @@ def create_company(db: Session, data: CompanyCreate, owner_id: uuid.UUID) -> tup
         country=data.country.upper(),
         base_currency=data.base_currency.upper(),
         is_vat_registered=data.is_vat_registered,
+        **{f: getattr(data, f) for f in _DETAIL_FIELDS},
     )
     db.add(company)
     db.flush()  # осигурява company.id преди създаване на членството
@@ -27,6 +35,17 @@ def create_company(db: Session, data: CompanyCreate, owner_id: uuid.UUID) -> tup
     db.refresh(company)
     db.refresh(membership)
     return company, membership
+
+
+def update_company(db: Session, company: Company, data: CompanyUpdate) -> Company:
+    """Обновява реквизитите на компанията (само подадените полета)."""
+    payload = data.model_dump(exclude_unset=True)
+    for field, value in payload.items():
+        if field in _DETAIL_FIELDS or field in ("name", "eik", "vat_number", "is_vat_registered"):
+            setattr(company, field, value)
+    db.commit()
+    db.refresh(company)
+    return company
 
 
 def list_companies_for_user(db: Session, user_id: uuid.UUID) -> list[tuple[Company, CompanyRole]]:

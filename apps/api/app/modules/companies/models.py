@@ -1,11 +1,22 @@
 """Tenant & Company Management — компании и членство на потребители с роли (RBAC)."""
 from __future__ import annotations
 
+import datetime as dt
 import enum
 import uuid
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, String, UniqueConstraint, Uuid
+from sqlalchemy import (
+    Boolean,
+    Date,
+    Enum as SAEnum,
+    ForeignKey,
+    Numeric,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
@@ -42,6 +53,27 @@ class Company(UUIDMixin, TimestampMixin, Base):
     base_currency: Mapped[str] = mapped_column(String(3), default="EUR", nullable=False)    # ISO-4217
     is_vat_registered: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # ---- Реквизити (за фактури, декларации и НАП файлове) ----
+    name_latin: Mapped[str | None] = mapped_column(String(255), nullable=True)       # транслитерация
+    legal_form: Mapped[str | None] = mapped_column(String(50), nullable=True)        # напр. ЕООД
+    address_city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    address_postcode: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    address_line: Mapped[str | None] = mapped_column(String(255), nullable=True)     # улица, №, ет., ап.
+    manager_name: Mapped[str | None] = mapped_column(String(255), nullable=True)     # представляващ
+    owner_name: Mapped[str | None] = mapped_column(String(255), nullable=True)       # собственик на капитала
+    phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    activity: Mapped[str | None] = mapped_column(String(500), nullable=True)         # основна дейност
+    vat_registration_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    incorporation_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    share_capital: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+
+    @property
+    def full_address(self) -> str:
+        """Адрес на един ред — за фактури и документи."""
+        parts = [p for p in (self.address_city, self.address_postcode, self.address_line) if p]
+        return ", ".join(parts)
 
     memberships: Mapped[list["Membership"]] = relationship(
         back_populates="company", cascade="all, delete-orphan"

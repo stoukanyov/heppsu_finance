@@ -122,3 +122,24 @@ class VatPeriodClosingOut(BaseModel):
     net_payable: Decimal
     net_refundable: Decimal
     created_at: dt.datetime
+
+
+# ---------- Списък с ДДС периоди (мобилен клиент: одобрение/отказ) ----------
+class VatPeriodSummaryOut(BaseModel):
+    """Обобщение на ДДС период за списъка с месечни отчети."""
+
+    period_id: uuid.UUID
+    code: str                    # напр. "2026-07"
+    start_date: dt.date
+    end_date: dt.date
+    output_vat: Decimal          # начислен ДДС (продажби)
+    input_vat: Decimal           # ДДС кредит (покупки)
+    net_payable: Decimal         # за внасяне (+) или за възстановяване (-)
+    status: str                  # OPEN | READY | APPROVED | REJECTED
+    closed_at: dt.datetime | None
+    # Допълнително (извън задължителния контракт): причината за последния отказ.
+    rejection_reason: str | None = None
+
+
+class VatPeriodRejectIn(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)

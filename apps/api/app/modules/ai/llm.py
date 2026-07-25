@@ -59,6 +59,49 @@ ANALYSIS_SCHEMA = {
     "required": ["summary", "explanation", "recommendations", "confidence"],
 }
 
+EXPENSE_CLASSIFICATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        # Счетоводно третиране
+        "account_code": {"type": "string"},          # сметка от подадения сметкоплан
+        "account_rationale": {"type": "string"},
+        # Данъчно третиране по ЗКПО
+        "is_deductible": {"type": "boolean"},        # признат разход за данъчни цели
+        "deductible_ratio": {"type": ["number", "null"]},  # 0..1 при частично признаване
+        "tax_rationale": {"type": "string"},
+        # Право на данъчен кредит по ЗДДС
+        "vat_credit": {
+            "type": "string",
+            "enum": ["FULL", "PARTIAL", "NONE", "UNKNOWN"],
+        },
+        "vat_rationale": {"type": "string"},
+        "expense_category": {"type": "string"},      # човешко описание, напр. „гориво", „наем"
+        "confidence": {"type": "number"},            # 0..1
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "account_code", "is_deductible", "vat_credit",
+        "tax_rationale", "confidence",
+    ],
+}
+
+_EXPENSE_SYSTEM = (
+    "Ти си главен счетоводител и данъчен експерт по българското законодателство "
+    "(ЗКПО, ЗДДС, Закон за счетоводството, НСС). Класифицирай разходен документ:\n"
+    "1) Избери НАЙ-ПОДХОДЯЩАТА сметка САМО от подадения сметкоплан (върни точния код).\n"
+    "2) Реши дали разходът е ДАНЪЧНО ПРИЗНАТ по ЗКПО. Типични НЕпризнати или ограничени: "
+    "разходи, несвързани с дейността; представителни разходи (данък върху разходите по чл. 204 ЗКПО); "
+    "дарения без основание; липси и брак без документ; глоби, санкции и лихви за просрочени публични "
+    "задължения; разходи без документална обоснованост по чл. 10 ЗКПО; лични разходи на собственика; "
+    "разходи за лек автомобил, използван за управленска дейност (ограничения по ЗДДС/ЗКПО).\n"
+    "3) Реши за правото на ДАНЪЧЕН КРЕДИТ по ЗДДС: NONE при липса на фактура с ДДС номер, "
+    "касова бележка без фактура, представителни разходи, лек автомобил и свързани разходи "
+    "(чл. 70 ЗДДС), освободени доставки; FULL при обичайни стопански разходи с редовна фактура.\n"
+    "ВАЖНО: не измисляй сметки, които не са в списъка. Ако данните са недостатъчни, дай ниска "
+    "увереност и добави предупреждение. Обосновките пиши на български, кратко и с позоваване на "
+    "разпоредбата, когато е приложимо. Ти само предлагаш — човек потвърждава."
+)
+
 _EXTRACT_SYSTEM = (
     "Ти си експерт по обработка на български счетоводни документи (фактури, известия). "
     "Извлечи полетата от документа възможно най-точно. Не измисляй стойности: ако поле "
@@ -76,6 +119,7 @@ _CFO_SYSTEM = (
 class LLMClient(Protocol):
     def extract_document(self, content: bytes, media_type: str, filename: str) -> dict: ...
     def financial_analysis(self, context: dict, question: str | None) -> dict: ...
+    def classify_expense(self, context: dict) -> dict: ...
 
 
 class AnthropicLLMClient:
@@ -119,6 +163,17 @@ class AnthropicLLMClient:
         user = f"Финансови данни (JSON):\n{json.dumps(context, ensure_ascii=False, default=str)}\n\nВъпрос: {q}"
         return self._structured(_CFO_SYSTEM, [{"type": "text", "text": user}], ANALYSIS_SCHEMA)
 
+    def classify_expense(self, context: dict) -> dict:
+        import json
+
+        user = (
+            "Класифицирай следния разходен документ на българска фирма.\n\n"
+            f"Данни (JSON):\n{json.dumps(context, ensure_ascii=False, default=str)}"
+        )
+        return self._structured(
+            _EXPENSE_SYSTEM, [{"type": "text", "text": user}], EXPENSE_CLASSIFICATION_SCHEMA
+        )
+
 
 class StubLLMClient:
     """Детерминиран клиент за dev/тестове — без мрежа."""
@@ -156,6 +211,93 @@ class StubLLMClient:
             "risks": [],
             "assumptions": ["Данните са агрегирани от оборотната ведомост."],
             "confidence": "medium",
+        }
+
+    def classify_expense(self, context: dict) -> dict:
+        """Детерминирана класификация по ключови думи — огледало на реалните правила.
+
+        Реалният AI дава нюансирана обосновка; stub-ът покрива най-честите случаи,
+        за да са възпроизводими тестовете и demo без API ключ.
+        """
+        text = " ".join(
+            str(context.get(k) or "")
+            for k in ("supplier_name", "document_type", "notes", "description", "expense_hint")
+        ).lower()
+        if context.get("is_receipt"):
+            text += " касова бележка"
+        available = {a.get("code") for a in context.get("available_accounts", []) if a.get("code")}
+
+        def pick(code: str, fallback: str = "602") -> str:
+            return code if code in available or not available else fallback
+
+        # Непризнати / ограничени разходи по ЗКПО и без данъчен кредит по чл. 70 ЗДДС.
+        if any(w in text for w in ("глоба", "санкц", "лихва за просроч", "неустойк")):
+            return {
+                "account_code": pick("609"),
+                "account_rationale": "Глоби и санкции се отчитат като други разходи.",
+                "is_deductible": False, "deductible_ratio": 0.0,
+                "tax_rationale": "Разходът не се признава за данъчни цели (глоби, санкции и лихви за просрочени публични задължения — чл. 26 ЗКПО).",
+                "vat_credit": "NONE",
+                "vat_rationale": "Няма право на данъчен кредит.",
+                "expense_category": "глоби и санкции",
+                "confidence": 0.9, "warnings": [],
+            }
+        if any(w in text for w in ("представит", "почерпк", "банкет", "коктейл")):
+            return {
+                "account_code": pick("609"),
+                "account_rationale": "Представителни разходи — други разходи.",
+                "is_deductible": False, "deductible_ratio": 0.0,
+                "tax_rationale": "Представителните разходи се облагат с данък върху разходите (чл. 204, ал. 1, т. 1 ЗКПО) и не намаляват данъчния резултат.",
+                "vat_credit": "NONE",
+                "vat_rationale": "Няма право на данъчен кредит по чл. 70, ал. 1, т. 3 ЗДДС.",
+                "expense_category": "представителни разходи",
+                "confidence": 0.85, "warnings": ["Провери дали е начислен данък върху разходите."],
+            }
+        if any(w in text for w in ("гориво", "бензин", "дизел", "shell", "omv", "лукойл", "petrol")):
+            return {
+                "account_code": pick("601"),
+                "account_rationale": "Горивата се отчитат като разходи за материали.",
+                "is_deductible": True, "deductible_ratio": 1.0,
+                "tax_rationale": "Признат разход при документална обоснованост и връзка с дейността (чл. 10 ЗКПО); при лек автомобил за управленска дейност се прилагат ограничения.",
+                "vat_credit": "FULL",
+                "vat_rationale": "Пълен данъчен кредит, освен ако автомобилът не е лек по смисъла на чл. 70, ал. 1, т. 4-5 ЗДДС.",
+                "expense_category": "гориво",
+                "confidence": 0.75,
+                "warnings": ["Уточни дали автомобилът е лек — влияе на данъчния кредит."],
+            }
+        if any(w in text for w in ("наем", "rent", "lease")):
+            return {
+                "account_code": pick("602"),
+                "account_rationale": "Наемът е разход за външни услуги.",
+                "is_deductible": True, "deductible_ratio": 1.0,
+                "tax_rationale": "Признат разход, свързан с дейността.",
+                "vat_credit": "FULL",
+                "vat_rationale": "Пълен данъчен кредит при редовна фактура.",
+                "expense_category": "наем",
+                "confidence": 0.85, "warnings": [],
+            }
+        if "касова бележка" in text or "receipt" in text:
+            return {
+                "account_code": pick("602"),
+                "account_rationale": "Разход за външни услуги (по подразбиране).",
+                "is_deductible": True, "deductible_ratio": 1.0,
+                "tax_rationale": "Признат при документална обоснованост и връзка с дейността.",
+                "vat_credit": "NONE",
+                "vat_rationale": "Касова бележка без фактура не дава право на данъчен кредит (чл. 71 ЗДДС).",
+                "expense_category": "дребен разход",
+                "confidence": 0.7,
+                "warnings": ["Липсва фактура — няма право на данъчен кредит."],
+            }
+        return {
+            "account_code": pick("602"),
+            "account_rationale": "По подразбиране — разходи за външни услуги.",
+            "is_deductible": True, "deductible_ratio": 1.0,
+            "tax_rationale": "Приема се за признат разход, свързан с дейността; изисква преглед.",
+            "vat_credit": "FULL",
+            "vat_rationale": "Пълен данъчен кредит при редовна фактура с ДДС номер.",
+            "expense_category": "общ разход",
+            "confidence": 0.55,
+            "warnings": ["Класификацията е по подразбиране (stub) — потвърди ръчно."],
         }
 
 

@@ -17,4 +17,5 @@ from app.modules.identity import models as identity_models  # noqa: F401
 from app.modules.invoicing import models as invoicing_models  # noqa: F401
 from app.modules.payments import models as payments_models  # noqa: F401
 from app.modules.purchases import models as purchases_models  # noqa: F401
+from app.modules.stores import models as stores_models  # noqa: F401
 from app.modules.vat import models as vat_models  # noqa: F401

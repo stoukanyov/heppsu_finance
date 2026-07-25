@@ -25,5 +25,5 @@ storage/
 node_modules/
 dist/
 
-# Claude Code local settings
-.claude/
+# Claude Code: споделяме settings.json, но не машинно-локалните настройки
+.claude/settings.local.json

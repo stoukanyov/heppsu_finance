@@ -35,8 +35,34 @@ class Settings(BaseSettings):
     # auto → anthropic ако има ключ, иначе stub (детерминиран, без мрежа — за dev/тестове).
     AI_PROVIDER: str = "auto"
 
+    # ---- Авто-осчетоводяване на разпознати документи ----
+    # Ако е True, документ с достатъчна увереност се осчетоводява автоматично
+    # (без ръчно потвърждение). По подразбиране е изключено — AI само предлага.
+    AUTO_POST_DOCUMENTS: bool = False
+    AUTO_POST_MIN_CONFIDENCE: float = 0.80
+
     # PDF: път към Unicode TTF шрифт (празно → авто-намиране DejaVu/Arial).
     PDF_FONT_PATH: str = ""
+
+    # ---- Интеграции с магазини (App Store / Google Play) ----
+    # auto → реален конектор ако има credentials, иначе stub (детерминиран, за dev/тестове).
+    STORE_PROVIDER: str = "auto"
+    # Apple App Store Connect API (JWT ES256): частен ключ .p8 + идентификатори.
+    APPLE_ISSUER_ID: str = ""
+    APPLE_KEY_ID: str = ""
+    APPLE_PRIVATE_KEY_PATH: str = ""   # път до AuthKey_XXXX.p8
+    APPLE_VENDOR_NUMBER: str = ""      # номер на доставчика (за Sales Reports)
+    # Google Play: финансовите отчети се експортират в Google Cloud Storage bucket.
+    GOOGLE_PLAY_BUCKET: str = ""       # напр. pubsite_prod_..._<developer id>
+    GOOGLE_APPLICATION_CREDENTIALS: str = ""  # път до service account JSON
+
+    @property
+    def resolved_store_provider(self) -> str:
+        if self.STORE_PROVIDER != "auto":
+            return self.STORE_PROVIDER
+        has_apple = bool(self.APPLE_ISSUER_ID and self.APPLE_KEY_ID and self.APPLE_PRIVATE_KEY_PATH)
+        has_google = bool(self.GOOGLE_PLAY_BUCKET and self.GOOGLE_APPLICATION_CREDENTIALS)
+        return "live" if (has_apple or has_google) else "stub"
 
     # Съхранение на документи
     DOCUMENT_STORAGE_DIR: str = "./storage/documents"

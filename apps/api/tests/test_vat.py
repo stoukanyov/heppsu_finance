@@ -237,6 +237,152 @@ def test_close_twice_rejected(client):
     assert client.post(f"{VAT}/periods/{pid}/close", headers=h).status_code == 409
 
 
+def _post_je(client, h, accounts, dr: str, cr: str, amount: str, num: str):
+    """Помощна: осчетоводена операция с два реда (дебит/кредит)."""
+    e = client.post(
+        f"{ACC}/journal-entries",
+        headers=h,
+        json={
+            "document_date": "2026-07-15",
+            "document_number": num,
+            "lines": [
+                {"account_id": accounts[dr]["id"], "debit": amount, "credit": "0"},
+                {"account_id": accounts[cr]["id"], "debit": "0", "credit": amount},
+            ],
+        },
+    ).json()
+    client.post(f"{ACC}/journal-entries/{e['id']}/post", headers=h)
+
+
+def _periods(client, h) -> list[dict]:
+    r = client.get(f"{VAT}/periods", headers=h)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _period_row(client, h, code: str = "2026-07") -> dict:
+    return next(p for p in _periods(client, h) if p["code"] == code)
+
+
+def test_list_vat_periods_sorted_and_summed(client):
+    h, codes = _setup_vat(client, "vatperiods@example.com")
+    client.post(f"{VAT}/entries", headers=h, json=_entry(codes["S20"]["id"], "1000.00", doc="S-1"))
+    client.post(f"{VAT}/entries", headers=h, json=_entry(codes["P20"]["id"], "500.00", doc="P-1"))
+
+    periods = _periods(client, h)
+    assert len(periods) == 12  # 12 месечни периода за фискалната година
+    # най-новите първи
+    assert [p["code"] for p in periods][:3] == ["2026-12", "2026-11", "2026-10"]
+
+    july = next(p for p in periods if p["code"] == "2026-07")
+    assert july["start_date"] == "2026-07-01" and july["end_date"] == "2026-07-31"
+    assert float(july["output_vat"]) == 200.0
+    assert float(july["input_vat"]) == 100.0
+    assert float(july["net_payable"]) == 100.0
+    assert july["status"] == "READY"
+    assert july["closed_at"] is None
+    # период без данни
+    june = next(p for p in periods if p["code"] == "2026-06")
+    assert june["status"] == "OPEN"
+    assert float(june["net_payable"]) == 0.0
+
+
+def test_vat_period_refundable_is_negative(client):
+    h, codes = _setup_vat(client, "vatperiodsref@example.com")
+    client.post(f"{VAT}/entries", headers=h, json=_entry(codes["S20"]["id"], "100.00", doc="S-1"))
+    client.post(f"{VAT}/entries", headers=h, json=_entry(codes["P20"]["id"], "1000.00", doc="P-1"))
+    july = _period_row(client, h)
+    # начислен 20, кредит 200 → −180 (за възстановяване)
+    assert float(july["net_payable"]) == -180.0
+    assert july["status"] == "READY"
+
+
+def test_vat_period_ready_then_approved(client):
+    h, codes = _setup_vat(client, "vatapprove@example.com")
+    accounts = {a["code"]: a for a in client.get(f"{ACC}/accounts", headers=h).json()}
+    client.post(f"{VAT}/entries", headers=h, json=_entry(codes["S20"]["id"], "1000.00", doc="S-1"))
+    client.post(f"{VAT}/entries", headers=h, json=_entry(codes["P20"]["id"], "500.00", doc="P-1"))
+    _post_je(client, h, accounts, "411", "4532", "200.00", "S-1v")
+    _post_je(client, h, accounts, "4531", "401", "100.00", "P-1v")
+
+    assert _period_row(client, h)["status"] == "READY"
+
+    pid = _period_id(client, h)
+    assert client.post(f"{VAT}/periods/{pid}/close", headers=h).status_code == 201
+
+    july = _period_row(client, h)
+    assert july["status"] == "APPROVED"
+    assert july["closed_at"] is not None
+    assert float(july["output_vat"]) == 200.0
+    assert float(july["input_vat"]) == 100.0
+    assert float(july["net_payable"]) == 100.0
+
+
+def test_reject_vat_period(client):
+    h, codes = _setup_vat(client, "vatreject@example.com")
+    client.post(f"{VAT}/entries", headers=h, json=_entry(codes["S20"]["id"], "1000.00", doc="S-1"))
+    pid = _period_id(client, h)
+
+    r = client.post(f"{VAT}/periods/{pid}/reject", headers=h, json={"reason": "Липсва фактура F-7"})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["period_id"] == pid
+    assert out["status"] == "REJECTED"
+    assert out["rejection_reason"] == "Липсва фактура F-7"
+    assert float(out["output_vat"]) == 200.0
+
+    # отразено и в списъка
+    july = _period_row(client, h)
+    assert july["status"] == "REJECTED"
+    assert july["rejection_reason"] == "Липсва фактура F-7"
+
+
+def test_reject_without_reason(client):
+    h, codes = _setup_vat(client, "vatreject2@example.com")
+    client.post(f"{VAT}/entries", headers=h, json=_entry(codes["S20"]["id"], "100.00", doc="S-1"))
+    pid = _period_id(client, h)
+    r = client.post(f"{VAT}/periods/{pid}/reject", headers=h, json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "REJECTED"
+    assert r.json()["rejection_reason"] is None
+
+
+def test_reject_approved_period_conflict(client):
+    h, codes = _setup_vat(client, "vatreject3@example.com")
+    accounts = {a["code"]: a for a in client.get(f"{ACC}/accounts", headers=h).json()}
+    _post_je(client, h, accounts, "411", "4532", "200.00", "S-1v")
+    pid = _period_id(client, h)
+    assert client.post(f"{VAT}/periods/{pid}/close", headers=h).status_code == 201
+
+    r = client.post(f"{VAT}/periods/{pid}/reject", headers=h, json={"reason": "късно"})
+    assert r.status_code == 409
+    assert "приключен" in r.json()["detail"]
+
+
+def test_approve_after_reject_clears_status(client):
+    h, codes = _setup_vat(client, "vatreject4@example.com")
+    accounts = {a["code"]: a for a in client.get(f"{ACC}/accounts", headers=h).json()}
+    client.post(f"{VAT}/entries", headers=h, json=_entry(codes["S20"]["id"], "1000.00", doc="S-1"))
+    _post_je(client, h, accounts, "411", "4532", "200.00", "S-1v")
+    pid = _period_id(client, h)
+
+    assert client.post(f"{VAT}/periods/{pid}/reject", headers=h, json={"reason": "корекция"}).status_code == 200
+    assert _period_row(client, h)["status"] == "REJECTED"
+    # след корекциите отчетът се одобрява → приключването има превес над отказа
+    assert client.post(f"{VAT}/periods/{pid}/close", headers=h).status_code == 201
+    july = _period_row(client, h)
+    assert july["status"] == "APPROVED"
+    assert july["rejection_reason"] is None
+
+
+def test_vat_periods_tenant_isolated(client):
+    h_a, codes_a = _setup_vat(client, "vatper-a@example.com")
+    client.post(f"{VAT}/entries", headers=h_a, json=_entry(codes_a["S20"]["id"], "1000.00", doc="S-1"))
+    h_b, _ = _setup_vat(client, "vatper-b@example.com")
+    assert all(float(p["output_vat"]) == 0.0 for p in _periods(client, h_b))
+    assert all(p["status"] == "OPEN" for p in _periods(client, h_b))
+
+
 def test_no_vat_entries_after_closing(client):
     h, codes = _setup_vat(client, "vatclose3@example.com")
     ACC = "/api/v1/accounting"

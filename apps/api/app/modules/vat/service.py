@@ -19,7 +19,13 @@ from app.modules.accounting.models import (
 from app.modules.accounting.schemas import JournalEntryCreate, JournalLineIn
 from app.modules.accounting.service import create_entry, find_period_for_date, post_entry
 from app.modules.companies.models import Company
-from app.modules.vat.models import VatCode, VatDirection, VatEntry, VatPeriodClosing
+from app.modules.vat.models import (
+    VatCode,
+    VatDirection,
+    VatEntry,
+    VatPeriodClosing,
+    VatPeriodRejection,
+)
 from app.modules.vat.schemas import (
     DeclarationCell,
     VatCodeCreate,
@@ -27,6 +33,8 @@ from app.modules.vat.schemas import (
     VatDeclarationOut,
     VatEntryCreate,
     VatPeriodClosingOut,
+    VatPeriodRejectIn,
+    VatPeriodSummaryOut,
     VatReturnOut,
     VatSideSummary,
 )
@@ -417,6 +425,204 @@ def close_vat_period(
     db.commit()
     db.refresh(closing)
     return closing
+
+
+# ============ Списък с ДДС периоди, одобрение и отказ (мобилен клиент) ============
+# Статуси на ДДС отчета за период — извеждат се от реалното състояние, не се пазят:
+STATUS_OPEN = "OPEN"          # няма данни за деклариране / още няма какво да се одобрява
+STATUS_READY = "READY"        # има данни и периодът не е приключен → чака одобрение
+STATUS_APPROVED = "APPROVED"  # има VatPeriodClosing (одобрен чрез /close)
+STATUS_REJECTED = "REJECTED"  # има запис за отказ и няма приключване
+
+
+def _entry_totals_by_period(
+    db: Session, company_id: uuid.UUID
+) -> dict[uuid.UUID, tuple[Decimal, Decimal]]:
+    """Суми (начислен ДДС, данъчен кредит) по период — от ДДС регистрите."""
+    rows = db.execute(
+        select(
+            VatEntry.period_id,
+            VatEntry.direction,
+            VatCode.gives_credit,
+            func.coalesce(func.sum(VatEntry.vat_amount), 0),
+        )
+        .join(VatCode, VatEntry.vat_code_id == VatCode.id)
+        .where(VatEntry.company_id == company_id)
+        .group_by(VatEntry.period_id, VatEntry.direction, VatCode.gives_credit)
+    ).all()
+
+    totals: dict[uuid.UUID, tuple[Decimal, Decimal]] = {}
+    for period_id, direction, gives_credit, amount in rows:
+        output_vat, input_vat = totals.get(period_id, (Decimal("0.00"), Decimal("0.00")))
+        amount = _q(Decimal(amount or 0))
+        if direction == VatDirection.SALE:
+            output_vat += amount
+        elif gives_credit:
+            input_vat += amount
+        totals[period_id] = (output_vat, input_vat)
+    return totals
+
+
+def _account_totals_by_period(
+    db: Session, company_id: uuid.UUID
+) -> dict[uuid.UUID, tuple[Decimal, Decimal]]:
+    """Резервен източник: обороти по 4532/4531 от осчетоводените операции.
+
+    Използва се за периоди без записи в ДДС регистрите (ДДС-то е дошло директно
+    от счетоводни операции) — иначе отчетът би изглеждал празен в списъка.
+    """
+    rows = db.execute(
+        select(
+            JournalEntry.period_id,
+            Account.code,
+            func.coalesce(func.sum(JournalLine.debit_base), 0)
+            - func.coalesce(func.sum(JournalLine.credit_base), 0),
+        )
+        .select_from(JournalLine)
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(
+            JournalEntry.company_id == company_id,
+            JournalEntry.status.in_(_POSTED_LIKE),
+            Account.code.in_((_ACC_VAT_OUTPUT, _ACC_VAT_INPUT)),
+        )
+        .group_by(JournalEntry.period_id, Account.code)
+    ).all()
+
+    totals: dict[uuid.UUID, tuple[Decimal, Decimal]] = {}
+    for period_id, code, balance in rows:
+        output_vat, input_vat = totals.get(period_id, (Decimal("0.00"), Decimal("0.00")))
+        value = _q(Decimal(balance or 0))
+        if code == _ACC_VAT_OUTPUT:
+            output_vat = -value if value < 0 else Decimal("0.00")  # пасив → кредитно салдо
+        else:
+            input_vat = value if value > 0 else Decimal("0.00")    # актив → дебитно салдо
+        totals[period_id] = (output_vat, input_vat)
+    return totals
+
+
+def _latest_rejections(
+    db: Session, company_id: uuid.UUID
+) -> dict[uuid.UUID, VatPeriodRejection]:
+    """Последният отказ за всеки период (пази се цялата история)."""
+    latest: dict[uuid.UUID, VatPeriodRejection] = {}
+    rows = db.scalars(
+        select(VatPeriodRejection)
+        .where(VatPeriodRejection.company_id == company_id)
+        .order_by(VatPeriodRejection.created_at)
+    )
+    for rejection in rows:
+        latest[rejection.period_id] = rejection
+    return latest
+
+
+def _period_summary(
+    period: AccountingPeriod,
+    closing: VatPeriodClosing | None,
+    rejection: VatPeriodRejection | None,
+    totals: tuple[Decimal, Decimal],
+) -> VatPeriodSummaryOut:
+    if closing is not None:
+        output_vat, input_vat = closing.output_vat, closing.input_vat
+        net_payable = closing.net_payable - closing.net_refundable
+        status_code = STATUS_APPROVED
+    else:
+        output_vat, input_vat = totals
+        net_payable = output_vat - input_vat
+        if rejection is not None:
+            status_code = STATUS_REJECTED
+        elif output_vat or input_vat:
+            status_code = STATUS_READY
+        else:
+            status_code = STATUS_OPEN
+    return VatPeriodSummaryOut(
+        period_id=period.id,
+        code=period.code,
+        start_date=period.start_date,
+        end_date=period.end_date,
+        output_vat=_q(output_vat),
+        input_vat=_q(input_vat),
+        net_payable=_q(net_payable),
+        status=status_code,
+        closed_at=closing.created_at if closing is not None else None,
+        rejection_reason=rejection.reason if (closing is None and rejection) else None,
+    )
+
+
+def list_vat_periods(db: Session, company_id: uuid.UUID) -> list[VatPeriodSummaryOut]:
+    """Месечните ДДС отчети на компанията — най-новите първи."""
+    periods = list(
+        db.scalars(
+            select(AccountingPeriod)
+            .where(AccountingPeriod.company_id == company_id)
+            .order_by(AccountingPeriod.start_date.desc(), AccountingPeriod.code.desc())
+        )
+    )
+    closings = {
+        c.period_id: c
+        for c in db.scalars(
+            select(VatPeriodClosing).where(VatPeriodClosing.company_id == company_id)
+        )
+    }
+    rejections = _latest_rejections(db, company_id)
+    entry_totals = _entry_totals_by_period(db, company_id)
+    account_totals = _account_totals_by_period(db, company_id)
+    zero = (Decimal("0.00"), Decimal("0.00"))
+
+    return [
+        _period_summary(
+            period,
+            closings.get(period.id),
+            rejections.get(period.id),
+            entry_totals.get(period.id) or account_totals.get(period.id) or zero,
+        )
+        for period in periods
+    ]
+
+
+def get_vat_period_summary(
+    db: Session, company_id: uuid.UUID, period_id: uuid.UUID
+) -> VatPeriodSummaryOut:
+    period = _period_or_404(db, company_id, period_id)
+    entry_totals = _entry_totals_by_period(db, company_id)
+    account_totals = _account_totals_by_period(db, company_id)
+    return _period_summary(
+        period,
+        _closing_for_period(db, company_id, period_id),
+        _latest_rejections(db, company_id).get(period_id),
+        entry_totals.get(period_id)
+        or account_totals.get(period_id)
+        or (Decimal("0.00"), Decimal("0.00")),
+    )
+
+
+def reject_vat_period(
+    db: Session,
+    company_id: uuid.UUID,
+    user_id: uuid.UUID,
+    period_id: uuid.UUID,
+    data: VatPeriodRejectIn,
+) -> VatPeriodSummaryOut:
+    """Връща ДДС периода за корекция (отказва одобрението)."""
+    period = _period_or_404(db, company_id, period_id)
+
+    if _closing_for_period(db, company_id, period_id) is not None:
+        raise _err(
+            f"ДДС периодът {period.code} вече е приключен — първо трябва да се отпуши "
+            f"приключването (сторно на приключвателната операция), преди да се върне за корекция",
+            status.HTTP_409_CONFLICT,
+        )
+
+    db.add(
+        VatPeriodRejection(
+            company_id=company_id,
+            period_id=period_id,
+            reason=data.reason,
+            rejected_by_id=user_id,
+        )
+    )
+    db.commit()
+    return get_vat_period_summary(db, company_id, period_id)
 
 
 # ---------- Стандартни български ДДС кодове (стартов шаблон, Q-002) ----------

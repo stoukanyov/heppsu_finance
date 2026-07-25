@@ -14,6 +14,8 @@ from app.modules.vat.schemas import (
     VatEntryCreate,
     VatEntryOut,
     VatPeriodClosingOut,
+    VatPeriodRejectIn,
+    VatPeriodSummaryOut,
     VatReturnOut,
 )
 
@@ -64,6 +66,21 @@ def get_vat_return(period_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> 
 @router.get("/periods/{period_id}/controls", response_model=list[VatControl])
 def get_vat_controls(period_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> list[VatControl]:
     return service.vat_period_controls(db, ctx.company.id, period_id)
+
+
+# ---------- Списък с ДДС периоди (одобрение / отказ) ----------
+@router.get("/periods", response_model=list[VatPeriodSummaryOut])
+def list_vat_periods(ctx: CurrentCompany, db: DbSession) -> list[VatPeriodSummaryOut]:
+    """Месечните ДДС отчети със статус и суми — най-новите първи."""
+    return service.list_vat_periods(db, ctx.company.id)
+
+
+@router.post("/periods/{period_id}/reject", response_model=VatPeriodSummaryOut)
+def reject_vat_period(
+    period_id: uuid.UUID, data: VatPeriodRejectIn, ctx: CurrentCompany, db: DbSession
+) -> VatPeriodSummaryOut:
+    """Връща ДДС периода за корекция. Одобрението минава през POST /periods/{id}/close."""
+    return service.reject_vat_period(db, ctx.company.id, ctx.membership.user_id, period_id, data)
 
 
 # ---------- Приключване на ДДС период ----------

@@ -67,6 +67,7 @@ def _register_routers(app: FastAPI) -> None:
     from app.modules.payments.router import router as payments_router
     from app.modules.purchases.router import router as purchases_router
     from app.modules.reports.router import router as reports_router
+    from app.modules.stores.router import router as stores_router
     from app.modules.vat.router import router as vat_router
 
     prefix = settings.API_V1_PREFIX
@@ -87,6 +88,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(invoicing_router, prefix=prefix)
     app.include_router(payments_router, prefix=prefix)
     app.include_router(purchases_router, prefix=prefix)
+    app.include_router(stores_router, prefix=prefix)
 
 
 app = create_app()

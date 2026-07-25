@@ -1,12 +1,32 @@
 """Pydantic схеми за Companies модула."""
+import datetime as dt
 import uuid
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.companies.models import CompanyRole
 
 
-class CompanyCreate(BaseModel):
+class CompanyDetails(BaseModel):
+    """Реквизити на дружеството — ползват се във фактури, декларации и НАП файлове."""
+
+    name_latin: str | None = Field(default=None, max_length=255)
+    legal_form: str | None = Field(default=None, max_length=50)
+    address_city: str | None = Field(default=None, max_length=120)
+    address_postcode: str | None = Field(default=None, max_length=10)
+    address_line: str | None = Field(default=None, max_length=255)
+    manager_name: str | None = Field(default=None, max_length=255)
+    owner_name: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=30)
+    email: str | None = Field(default=None, max_length=255)
+    activity: str | None = Field(default=None, max_length=500)
+    vat_registration_date: dt.date | None = None
+    incorporation_date: dt.date | None = None
+    share_capital: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=2)
+
+
+class CompanyCreate(CompanyDetails):
     name: str = Field(min_length=1, max_length=255)
     eik: str | None = Field(default=None, max_length=20)
     vat_number: str | None = Field(default=None, max_length=20)
@@ -15,7 +35,16 @@ class CompanyCreate(BaseModel):
     is_vat_registered: bool = False
 
 
-class CompanyOut(BaseModel):
+class CompanyUpdate(CompanyDetails):
+    """Частично обновяване на реквизитите (всички полета са по избор)."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    eik: str | None = Field(default=None, max_length=20)
+    vat_number: str | None = Field(default=None, max_length=20)
+    is_vat_registered: bool | None = None
+
+
+class CompanyOut(CompanyDetails):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID

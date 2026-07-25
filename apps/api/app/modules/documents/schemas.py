@@ -3,7 +3,11 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.modules.ai.schemas import ExtractionOut  # leaf модул — без цикъл
+from app.modules.accounting.schemas import JournalEntryOut
+from app.modules.ai.schemas import (  # leaf модул — без цикъл
+    ExtractionOut,
+    PostingProposalOut,
+)
 from app.modules.documents.models import DocumentSource, DocumentStatus, DocumentType
 
 
@@ -38,7 +42,23 @@ class DocumentStatusUpdate(BaseModel):
 
 
 class ScanResultOut(BaseModel):
-    """Резултат от мобилно сканиране: и документът (изображение), и разпознатите данни."""
+    """Резултат от мобилно сканиране: документът, разпознатите данни и предложената статия."""
 
     document: DocumentOut
     extraction: ExtractionOut
+    # None, ако предложението не може да се направи — сканът не се проваля заради това.
+    posting: PostingProposalOut | None = None
+
+
+class PostingConfirmOut(BaseModel):
+    """Резултат от потвърждаване: осчетоводената статия и придвижения документ."""
+
+    document: DocumentOut
+    entry: JournalEntryOut
+
+
+class PostingConfirmOut(BaseModel):
+    """Резултат от човешкото потвърждение: осчетоводената статия и документът."""
+
+    document: DocumentOut
+    entry: JournalEntryOut
