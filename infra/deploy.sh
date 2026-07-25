@@ -45,9 +45,16 @@ COMMIT=$(git rev-parse --short "${GIT_REF}^{commit}")
 DESCRIBE=$(git describe --tags --always "${GIT_REF}" 2>/dev/null || echo "$COMMIT")
 ok "ref ${GIT_REF} → ${DESCRIBE} (${COMMIT})"
 
-if [ "$ENV_NAME" = "prod" ] && [ -n "$(git status --porcelain)" ]; then
-    git status --short | head -20
-    die "работната директория е мръсна — production се деплойва само от чист, комитнат код"
+# Мръсното дърво е проблем само когато ref-ът е двусмислен (HEAD или клон): тогава
+# лесно се мисли, че се качва работното състояние, а се качва последният комит.
+# При изричен таг няма двусмислие — тагът е фиксиран.
+IS_TAG=$(git tag --list "$GIT_REF" | head -1)
+if [ -n "$(git status --porcelain)" ]; then
+    if [ "$ENV_NAME" = "prod" ] && [ -z "$IS_TAG" ]; then
+        git status --short | head -20
+        die "работната директория е мръсна — production се деплойва от таг, не от '${GIT_REF}'"
+    fi
+    printf '\033[1;33m  ! има некомитнати промени — те НЕ влизат в този деплой\033[0m\n'
 fi
 
 log "Проверка за разрушителни миграции"
