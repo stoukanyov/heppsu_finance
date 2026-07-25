@@ -716,9 +716,13 @@ function lineChart(labels, series, opts={}){
   const nice=(v)=>{ const a=Math.abs(v); if(a>=1e6) return (v/1e6).toFixed(1).replace('.0','')+'M'; if(a>=1e3) return Math.round(v/1e3)+'K'; return String(Math.round(v)); };
   const x=i=>PL+(labels.length<2?0:i*(W-PL-PR)/(labels.length-1));
   const y=v=>PT+(max-Number(v))/(max-min||1)*(H-PT-PB);
-  const ticks=[0,.25,.5,.75,1].map(t=>min+(max-min)*t);
-  const grid=ticks.map(t=>`<line x1="${PL}" x2="${W-PR}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}" stroke="#EEF0F5" stroke-width="1"/>`
-    +`<text x="${PL-10}" y="${(y(t)+4).toFixed(1)}" text-anchor="end" font-size="11" fill="#8A92A6">${nice(t)}</text>`).join('');
+  // Скалата може да е много тясна (напр. само нули) — не повтаряме един и същ етикет.
+  const seen=new Set();
+  const grid=[0,.25,.5,.75,1].map(t=>min+(max-min)*t).map(t=>{
+    const lab=nice(t), dup=seen.has(lab); seen.add(lab);
+    return `<line x1="${PL}" x2="${W-PR}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}" stroke="#EEF0F5" stroke-width="1"/>`
+      + (dup?'':`<text x="${PL-10}" y="${(y(t)+4).toFixed(1)}" text-anchor="end" font-size="11" fill="#8A92A6">${lab}</text>`);
+  }).join('');
   const zero=(min<0&&max>0)?`<line x1="${PL}" x2="${W-PR}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" stroke="#D7DCE8" stroke-width="1"/>`:'';
   const xlab=labels.map((l,i)=>`<text x="${x(i).toFixed(1)}" y="${H-8}" text-anchor="middle" font-size="11" fill="#8A92A6">${esc(l)}</text>`).join('');
   const paths=series.map(s=>{
@@ -1008,7 +1012,8 @@ async function viewDashboard(main){
     || (periods || []).find(p=>p.code <= thisCode);
   const vatDue = vatPeriod ? Number(vatPeriod.net_payable) : 0;
   const kpi = (label, value, prevValue, icon, cls, {goodUp=true, seriesKey=null, note='спрямо предходния месец', unit=cur}={})=>{
-    const sp = seriesKey && pts.length > 1 ? spark(pts.map(p=>p[seriesKey]), cls==='c-red'?CHART.red:cls==='c-green'?CHART.green:CHART.purple) : '';
+    const sp = seriesKey && pts.length > 1 && hasFlow
+      ? spark(pts.map(p=>p[seriesKey]), cls==='c-red'?CHART.red:cls==='c-green'?CHART.green:CHART.purple) : '';
     return `<div class="card kpi">
       <div class="hdr"><div class="chip ${cls}">${ic(icon)}</div><div class="l">${esc(label)}</div></div>
       <div class="v">${fmt(value)} <span class="muted" style="font-size:14px;font-weight:500;">${esc(unit)}</span></div>
@@ -1032,13 +1037,16 @@ async function viewDashboard(main){
 
   /* --- Паричен поток (line chart) --- */
   let cashflow;
-  if(pts.length > 1){
+  const hasFlow = pts.some(p=>Number(p.revenue) || Number(p.expenses) || Number(p.cash));
+  if(pts.length > 1 && hasFlow){
     cashflow = lineChart(pts.map(p=>p.label), [
       {key:'rev', label:'Приходи',  color:CHART.blue,   values:pts.map(p=>p.revenue), area:true},
       {key:'pro', label:'Печалба',  color:CHART.green,  values:pts.map(p=>p.profit)},
       {key:'exp', label:'Разходи',  color:CHART.red,    values:pts.map(p=>p.expenses)},
     ], {unit:cur});
-  } else cashflow = empty('Нужни са поне два месеца с операции за графиката.');
+  } else cashflow = `<div class="empty">${ic('chart')}
+    <div>Още няма осчетоводени операции за графиката.</div>
+    <button class="sm" style="margin:12px auto 0;" onclick="navigate('accounting')">Към счетоводството</button></div>`;
 
   /* --- Разходи по категории (donut) --- */
   let donutHtml = '', legendHtml = '';
