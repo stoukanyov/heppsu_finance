@@ -45,6 +45,29 @@ def _fresh_database():
     shutil.rmtree(_DOCS_DIR, ignore_errors=True)
 
 
+def _reset_schema(engine, Base) -> None:
+    """Изчиства данните между тестовете.
+
+    При SQLite drop_all/create_all е евтино. При PostgreSQL струва секунди на тест
+    заради външните ключове — 369 теста стават 25 минути и портата в CI спира да се
+    ползва. Затова там схемата се създава веднъж, а между тестовете се прави
+    TRUNCATE, който е с порядъци по-бърз и дава същата изолация.
+    """
+    if _USING_SQLITE:
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+        return
+
+    from sqlalchemy import inspect, text
+
+    if not inspect(engine).get_table_names():
+        Base.metadata.create_all(bind=engine)
+        return
+    tables = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
+    with engine.begin() as conn:
+        conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+
+
 @pytest.fixture()
 def client():
     from fastapi.testclient import TestClient
@@ -54,9 +77,8 @@ def client():
     from app.db.base import Base
     from app.main import app
 
-    # Чиста схема преди всеки тест → пълна изолация между тестовете.
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    # Чисти данни преди всеки тест → пълна изолация между тестовете.
+    _reset_schema(engine, Base)
 
     with TestClient(app) as test_client:
         yield test_client
