@@ -16,6 +16,7 @@ if TYPE_CHECKING:  # само за типове — без цикъл при и�
     from app.modules.companies.models import Company
     from app.modules.vat.models import VatEntry
     from app.modules.vat.nap_export import DeclarationCells
+    from app.tax_engine.export.validation import ValidationReport
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,18 @@ class TaxProvider(ABC):
     ) -> tuple[bytes, DeclarationCells]:
         """Генерира пакета файлове за подаване (напр. ZIP за НАП) + изчислените клетки."""
         raise NotImplementedError
+
+    def validate_filing_package(
+        self, company: Company, period_code: str, entries: list[VatEntry]
+    ) -> ValidationReport:
+        """Проверява пакета преди подаване (формат, кодировка, контролни суми).
+
+        Не е абстрактен: юрисдикция без формални изисквания връща празен доклад и
+        нищо не се чупи. Провайдър, който има спецификация, я налага тук.
+        """
+        from app.tax_engine.export.validation import ValidationReport
+
+        return ValidationReport(target=f"{self.jurisdiction.name} · период {period_code}")
 
     @property
     def filing_filename(self) -> str:

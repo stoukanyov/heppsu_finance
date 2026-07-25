@@ -26,6 +26,14 @@ from enum import Enum
 
 from app.modules.companies.models import Company
 from app.modules.vat.models import VatDirection, VatEntry
+from app.tax_engine.export.validation import (
+    ERROR,
+    WARNING,
+    FieldSpec,
+    ValidationReport,
+    check_encoding,
+    validate_delimited,
+)
 
 ENCODING = "cp1251"
 NEWLINE = "\r\n"
@@ -51,6 +59,79 @@ def _period_code(period_code: str) -> str:
 
 def _clip(text: str | None, width: int) -> str:
     return (text or "")[:width]
+
+
+# ------------------------------------------------------ спецификация на полетата
+# Единственото място, което знае дължините. Ползва се и от генерирането, и от
+# валидацията (`validate_nap_files`) — така описанието не може да се разминe с
+# това, което реално се записва. При промяна в спецификацията на НАП се пипа тук.
+W_VAT_NO = 15      # идентификационен номер по ЗДДС
+W_NAME = 50        # наименование на лицето
+W_SEQ = 5          # пореден номер на документа в дневника
+W_DOC_TYPE = 2     # вид на документа
+W_DOC_NO = 20      # номер на документа
+W_DESC = 30        # вид на стоката/услугата
+
+_F = FieldSpec
+
+PRODAGBI_FIELDS: list[FieldSpec] = [
+    _F("ЕИК по ЗДДС", W_VAT_NO, required=True),
+    _F("Наименование на лицето", W_NAME, required=True),
+    _F("Данъчен период", 6, required=True),
+    _F("Пореден номер", W_SEQ, required=True),
+    _F("Вид на документа", W_DOC_TYPE, required=True),
+    _F("Номер на документа", W_DOC_NO, required=True),
+    _F("Дата на документа", 10, required=True),
+    _F("ЕИК по ЗДДС на контрагента", W_VAT_NO),
+    _F("Наименование на контрагента", W_NAME),
+    _F("Вид на стоката/услугата", W_DESC),
+    _F("к.11 Общ размер на ДО за облагане", 15, numeric=True),
+    _F("к.12 Всичко начислен ДДС", 15, numeric=True),
+    _F("к.13 ДО облагаема 20%", 15, numeric=True),
+    _F("к.14 Начислен ДДС 20%", 15, numeric=True),
+    _F("к.15 ДО облагаема 9%", 15, numeric=True),
+    _F("к.16 Начислен ДДС 9%", 15, numeric=True),
+    _F("к.17 ДО облагаема 0% (износ)", 15, numeric=True),
+    _F("к.18 ДО на ВОД", 15, numeric=True),
+    _F("к.19 ДО тристранна операция / чл. 21", 15, numeric=True),
+    _F("к.20 ДО освободени доставки", 15, numeric=True),
+]
+
+POKUPKI_FIELDS: list[FieldSpec] = [
+    _F("ЕИК по ЗДДС", W_VAT_NO, required=True),
+    _F("Наименование на лицето", W_NAME, required=True),
+    _F("Данъчен период", 6, required=True),
+    _F("Пореден номер", W_SEQ, required=True),
+    _F("Вид на документа", W_DOC_TYPE, required=True),
+    _F("Номер на документа", W_DOC_NO, required=True),
+    _F("Дата на документа", 10, required=True),
+    _F("ЕИК по ЗДДС на контрагента", W_VAT_NO),
+    _F("Наименование на контрагента", W_NAME),
+    _F("Вид на стоката/услугата", W_DESC),
+    _F("к.30 ДО без право на данъчен кредит", 15, numeric=True),
+    _F("к.31 ДО с право на пълен данъчен кредит", 15, numeric=True),
+    _F("к.41 ДДС с право на пълен данъчен кредит", 15, numeric=True),
+    _F("к.33 ДО с право на частичен данъчен кредит", 15, numeric=True),
+    _F("к.42 ДДС с право на частичен данъчен кредит", 15, numeric=True),
+]
+
+DEKLAR_HEADER_FIELDS: list[FieldSpec] = [
+    _F("ЕИК по ЗДДС", W_VAT_NO, required=True),
+    _F("Наименование на лицето", W_NAME, required=True),
+    _F("Данъчен период", 6, required=True),
+]
+
+DEKLAR_ROW_FIELDS: list[FieldSpec] = [
+    _F("Номер на клетка", 2, required=True),
+    _F("Стойност", 15, numeric=True),
+]
+
+VIES_FIELDS: list[FieldSpec] = [
+    _F("ЕИК по ЗДДС", W_VAT_NO, required=True),
+    _F("Данъчен период", 6, required=True),
+    _F("ЕИК по ЗДДС на контрагента", W_VAT_NO, required=True),
+    _F("Данъчна основа", 15, numeric=True),
+]
 
 
 # ------------------------------------------------------ класификация в колони
@@ -232,15 +313,15 @@ def render_prodagbi(company: Company, period_code: str, entries: list[VatEntry])
         base_exempt = e.tax_base if b == SaleBucket.EXEMPT else _ZERO
         fields = [
             ident,
-            _clip(company.name, 50),
+            _clip(company.name, W_NAME),
             per,
-            f"{seq:05d}",
-            _clip(e.document_type or "01", 2),
-            _clip(e.document_number, 20),
+            f"{seq:0{W_SEQ}d}",
+            _clip(e.document_type or "01", W_DOC_TYPE),
+            _clip(e.document_number, W_DOC_NO),
             _ddmmyyyy(e.document_date),
-            _clip(e.counterparty_vat_number, 15),
-            _clip(e.counterparty_name, 50),
-            _clip((e.document_type and "Стоки/услуги") or "Стоки/услуги", 30),
+            _clip(e.counterparty_vat_number, W_VAT_NO),
+            _clip(e.counterparty_name, W_NAME),
+            _clip((e.document_type and "Стоки/услуги") or "Стоки/услуги", W_DESC),
             _num(e.tax_base + e.vat_amount),  # к.11 общ размер ДО за облагане
             _num(e.vat_amount),               # к.12 всичко начислен ДДС
             _num(base20),                     # к.13
@@ -274,15 +355,15 @@ def render_pokupki(company: Company, period_code: str, entries: list[VatEntry]) 
         base_nocredit = e.tax_base if b == PurchaseBucket.NOCREDIT else _ZERO
         fields = [
             ident,
-            _clip(company.name, 50),
+            _clip(company.name, W_NAME),
             per,
-            f"{seq:05d}",
-            _clip(e.document_type or "01", 2),
-            _clip(e.document_number, 20),
+            f"{seq:0{W_SEQ}d}",
+            _clip(e.document_type or "01", W_DOC_TYPE),
+            _clip(e.document_number, W_DOC_NO),
             _ddmmyyyy(e.document_date),
-            _clip(e.counterparty_vat_number, 15),
-            _clip(e.counterparty_name, 50),
-            _clip("Стоки/услуги", 30),
+            _clip(e.counterparty_vat_number, W_VAT_NO),
+            _clip(e.counterparty_name, W_NAME),
+            _clip("Стоки/услуги", W_DESC),
             _num(base_nocredit),  # к.30 ДО без право на ДК
             _num(base_full),      # к.31 ДО пълен ДК
             _num(vat_full),       # к.41 ДДС пълен ДК
@@ -297,7 +378,7 @@ def render_deklar(company: Company, period_code: str, cells: DeclarationCells) -
     """Справка-декларация (DEKLAR.TXT) — клетка;стойност на ред."""
     ident = company.vat_number or company.eik or ""
     per = _period_code(period_code)
-    header = ";".join([ident, _clip(company.name, 50), per])
+    header = ";".join([ident, _clip(company.name, W_NAME), per])
     lines = [header]
     for row in cells.as_rows():
         lines.append(f"{row['cell']};{_num(row['amount'])}")
@@ -319,8 +400,149 @@ def render_vies(company: Company, period_code: str, entries: list[VatEntry]) -> 
         vat = e.counterparty_vat_number or ""
         agg[vat] = agg.get(vat, _ZERO) + e.tax_base
     for vat_no, base in sorted(agg.items()):
-        lines.append(";".join([ident, per, _clip(vat_no, 15), _num(base)]))
+        lines.append(";".join([ident, per, _clip(vat_no, W_VAT_NO), _num(base)]))
     return NEWLINE.join(lines) + (NEWLINE if lines else "")
+
+
+def render_nap_files(
+    company: Company, period_code: str, entries: list[VatEntry]
+) -> tuple[dict[str, str], DeclarationCells]:
+    """Генерира съдържанието на файловете (без пакетиране) + клетките."""
+    cells = compute_declaration_cells(entries)
+    files = {
+        "POKUPKI.TXT": render_pokupki(company, period_code, entries),
+        "PRODAGBI.TXT": render_prodagbi(company, period_code, entries),
+        "DEKLAR.TXT": render_deklar(company, period_code, cells),
+    }
+    vies = render_vies(company, period_code, entries)
+    if vies.strip():
+        files["VIES.TXT"] = vies
+    return files, cells
+
+
+def validate_nap_files(
+    company: Company, period_code: str, entries: list[VatEntry]
+) -> ValidationReport:
+    """Проверява пакета за НАП, преди да е свален и подаден.
+
+    Обхваща три вида грешки: структурни (брой и дължина на полетата), кодировъчни
+    (знак, който CP1251 не носи) и контролни (клетките на декларацията срещу
+    сумите в дневниците).
+    """
+    report = ValidationReport(target=f"Пакет за НАП · период {period_code}")
+    files, cells = render_nap_files(company, period_code, entries)
+
+    specs = {
+        "POKUPKI.TXT": POKUPKI_FIELDS,
+        "PRODAGBI.TXT": PRODAGBI_FIELDS,
+        "VIES.TXT": VIES_FIELDS,
+    }
+    for name, content in files.items():
+        report.extend(check_encoding(content, ENCODING, source=name))
+        if name in specs:
+            report.extend(validate_delimited(content, specs[name], source=name))
+
+    # DEKLAR.TXT е с различна структура: заглавен ред + редове „клетка;стойност“.
+    deklar = files["DEKLAR.TXT"].splitlines()
+    if deklar:
+        report.extend(validate_delimited(deklar[0], DEKLAR_HEADER_FIELDS, source="DEKLAR.TXT"))
+        body = NEWLINE.join(deklar[1:])
+        report.extend(validate_delimited(body, DEKLAR_ROW_FIELDS, source="DEKLAR.TXT"))
+
+    # --- контролни суми ---
+    # Начисленият ДДС по к.20 е този от продажбите плюс самоначисленият по ВОП/чл.82.
+    charged = sum(
+        (
+            e.vat_amount
+            for e in entries
+            if e.direction == VatDirection.SALE
+            or classify_purchase(e) == PurchaseBucket.ICA
+        ),
+        _ZERO,
+    )
+    if cells.c20_vat_total != charged:
+        report.add(
+            ERROR,
+            f"Клетка 20 ({cells.c20_vat_total}) не съвпада с начисления ДДС по записите "
+            f"({charged}) — продажбите плюс самоначисления по ВОП и чл. 82",
+            path="к.20",
+            source="DEKLAR.TXT",
+        )
+
+    sum_of_bases = (
+        cells.c11_base_20 + cells.c12_base_ica_82 + cells.c13_base_9
+        + cells.c14_base_export + cells.c15_base_ics + cells.c17_base_tri
+    )
+    if cells.c01_base_taxable != sum_of_bases:
+        report.add(
+            ERROR,
+            f"Клетка 01 ({cells.c01_base_taxable}) не е сборът на клетки 11, 12, 13, 14, "
+            f"15 и 17 ({sum_of_bases})",
+            path="к.01",
+            source="DEKLAR.TXT",
+        )
+
+    if cells.c40_credit_total != cells.c41_vat_full + cells.c42_vat_partial:
+        report.add(
+            ERROR,
+            "Клетка 40 не е сборът на клетки 41 и 42",
+            path="к.40",
+            source="DEKLAR.TXT",
+        )
+
+    if cells.c50_vat_payable > _ZERO and cells.c60_vat_refundable > _ZERO:
+        report.add(
+            ERROR,
+            "Едновременно попълнени клетка 50 (за внасяне) и клетка 60 (за възстановяване) "
+            "— взаимно изключващи се",
+            path="к.50/60",
+            source="DEKLAR.TXT",
+        )
+    net = cells.c20_vat_total - cells.c40_credit_total
+    if cells.c50_vat_payable - cells.c60_vat_refundable != net:
+        report.add(
+            ERROR,
+            f"Резултатът за периода ({cells.c50_vat_payable - cells.c60_vat_refundable}) "
+            f"не отговаря на клетка 20 минус клетка 40 ({net})",
+            path="к.50/60",
+            source="DEKLAR.TXT",
+        )
+
+    # Дневникът за продажбите срещу декларацията: сборът на колона к.12 в дневника
+    # трябва да е начисленият ДДС от продажби.
+    sales_vat = sum(
+        (e.vat_amount for e in entries if e.direction == VatDirection.SALE), _ZERO
+    )
+    journal_vat = _ZERO
+    for row in files["PRODAGBI.TXT"].splitlines():
+        parts = row.split(";")
+        if len(parts) == len(PRODAGBI_FIELDS):
+            journal_vat += Decimal(parts[11])
+    if journal_vat != sales_vat:
+        report.add(
+            ERROR,
+            f"Сборът на колона к.12 в дневника за продажбите ({journal_vat}) не съвпада "
+            f"с начисления ДДС по записите ({sales_vat})",
+            source="PRODAGBI.TXT",
+        )
+
+    # --- реквизити, без които НАП отхвърля подаването ---
+    if not (company.vat_number or company.eik):
+        report.add(ERROR, "Липсва идентификационен номер на дружеството (ДДС номер или ЕИК)")
+    if not company.vat_number:
+        report.add(WARNING, "Липсва ДДС номер — подава се ЕИК, което НАП може да не приеме")
+    if not entries:
+        report.add(WARNING, "В периода няма ДДС записи — подава се празна декларация")
+
+    missing_cp = sum(
+        1 for e in entries if not (e.counterparty_vat_number or e.counterparty_name)
+    )
+    if missing_cp:
+        report.add(
+            WARNING,
+            f"{missing_cp} записа са без данни за контрагента — проверете ги преди подаване",
+        )
+    return report
 
 
 def build_nap_zip(

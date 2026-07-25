@@ -296,6 +296,15 @@ def build_nap_files(
     return zip_bytes, f"NAP-DDS-{per}.zip"
 
 
+def validate_nap_package(db: Session, company_id: uuid.UUID, period_id: uuid.UUID):
+    """Проверява пакета за НАП за периода през данъчния плъгин на държавата."""
+    period = _period_or_404(db, company_id, period_id)
+    company = _company_or_404(db, company_id)
+    entries = list_vat_entries(db, company_id, period_id=period_id)
+    provider = get_provider(company.country)
+    return provider.validate_filing_package(company, period.code, entries)
+
+
 # ============================ Приключване на ДДС период ============================
 _ACC_VAT_INPUT = "4531"       # Начислен ДДС на покупките (данъчен кредит) — актив
 _ACC_VAT_OUTPUT = "4532"      # Начислен ДДС на продажбите — пасив

@@ -39,3 +39,31 @@ def generate_chl73_6(report: Chl736Report, ctx: CurrentCompany, db: DbSession) -
         media_type="application/xml; charset=windows-1251",
         headers={"Content-Disposition": 'attachment; filename="SPR73_6.xml"'},
     )
+
+
+@router.post("/chl73-6/validate", dependencies=[require("reports.export")])
+def validate_chl73_6(report: Chl736Report, ctx: CurrentCompany, db: DbSession) -> dict:
+    """Сверява файла със схемата SPR73_6.xsd на НАП, преди да бъде подаден.
+
+    Схемата е в репото, затова проверката е формална и пълна — грешките идват с
+    път в документа.
+    """
+    if report.payer is None:
+        company = ctx.company
+        if not company.eik:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Компанията няма попълнен ЕИК — задайте платец (payer) в заявката.",
+            )
+        report.payer = Chl736Payer(eik=company.eik, name=company.name)
+
+    result = generator.validate_xml(generator.build_xml(report))
+    return {
+        "target": result.target,
+        "ok": result.ok,
+        "summary": result.summary(),
+        "schema_name": result.schema_name,
+        "schema_present": result.schema_present,
+        "errors": [{"message": i.message, "path": i.path, "line": i.line} for i in result.errors],
+        "warnings": [{"message": i.message, "path": i.path} for i in result.warnings],
+    }

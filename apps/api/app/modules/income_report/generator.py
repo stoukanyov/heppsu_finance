@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from decimal import Decimal
+from pathlib import Path
 
 from app.modules.income_report.schemas import (
     Chl736IncomeLine,
@@ -15,8 +16,14 @@ from app.modules.income_report.schemas import (
     Chl736Report,
     Chl736TaxBase49,
 )
+from app.tax_engine.export.validation import ValidationReport, XsdSchema
 
 ENCODING = "windows-1251"
+
+# Официалната схема на НАП е в репото до генератора — валидацията е реална, не хипотетична.
+SCHEMA = XsdSchema(
+    "SPR73_6.xsd", "Справка по чл. 73, ал. 6 ЗДДФЛ", directory=Path(__file__).resolve().parent
+)
 
 
 def _num(value: Decimal | None) -> str:
@@ -119,3 +126,22 @@ def build_xml(report: Chl736Report) -> bytes:
     body = ET.tostring(root, encoding="unicode")
     xml = f'<?xml version="1.0" encoding="WINDOWS-1251"?>\n{body}'
     return xml.encode(ENCODING, errors="replace")
+
+
+def validate_xml(xml: bytes) -> ValidationReport:
+    """Сверява готовия файл със схемата SPR73_6.xsd на НАП.
+
+    Схемата е налична, затова тази проверка е формална и пълна — не разчита на
+    структурни евристики като SAF-T, докато официалният XSD за него го няма.
+    """
+    report = ValidationReport(
+        target="Справка по чл. 73, ал. 6 ЗДДФЛ",
+        schema_name=SCHEMA.name,
+        schema_present=SCHEMA.available,
+    )
+    # Схемата е писана за WINDOWS-1251; валидаторът работи с текст, затова
+    # прекодираме, вместо да подаваме сурови байтове с чужда декларация.
+    text = xml.decode(ENCODING, errors="replace")
+    text = text.replace('encoding="WINDOWS-1251"', 'encoding="UTF-8"', 1)
+    report.extend(SCHEMA.validate(text.encode("utf-8")))
+    return report

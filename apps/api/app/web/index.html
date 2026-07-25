@@ -690,6 +690,27 @@ const pill = (s)=>`<span class="pill ${STAT[s]||'s-gray'}">${esc(STAT_BG[s]||s)}
 const ROLES = ['OWNER','MANAGER','CFO','CHIEF_ACCOUNTANT','ACCOUNTANT','EXTERNAL_ACCOUNTANT','AUDITOR','TAX_CONSULTANT','EMPLOYEE_SUBMITTER','EMPLOYEE_APPROVER','SYS_ADMIN','SECURITY_ADMIN','READ_ONLY'];
 const optlist = (arr,v,l)=>arr.map(x=>`<option value="${x[v]}">${esc(x[l])}</option>`).join('');
 const pageH = (title, sub, right='')=>`<div class="page-h"><div><h2>${esc(title)}</h2>${sub?`<div class="sub">${esc(sub)}</div>`:''}</div><div class="flex">${right}</div></div>`;
+
+/* Доклад от проверката на изходен файл — една форма за ДДС пакета, SAF-T и чл.73. */
+function validationHtml(v){
+  const where=(i)=>{ const p=[i.source,i.path,i.line?`ред ${i.line}`:null].filter(Boolean).join(' · ');
+    return p?`<div class="hint" style="margin-top:2px;">${esc(p)}</div>`:''; };
+  const item=(i,color)=>`<li style="color:var(--${color})">${ic('alert')}<span style="color:var(--ink-2)">${esc(i.message)}${where(i)}</span></li>`;
+  return `<div class="card" style="margin-top:12px;border-color:var(--${v.ok?'good':'bad'});">
+    <div class="card-t"><h3>${esc(v.target||'Проверка на файла')}</h3>
+      <span class="pill ${v.ok?'s-green':'s-red'}">${esc(v.summary)}</span></div>
+    ${v.schema_name?`<div class="hint" style="margin-bottom:8px;">Схема: ${esc(v.schema_name)} ·
+      ${v.schema_present?'сверено със схемата':'схемата не е инсталирана — проверени са само структурните правила'}</div>`:''}
+    ${v.errors.length?`<ul class="check">${v.errors.map(i=>item(i,'bad')).join('')}</ul>`:''}
+    ${v.warnings.length?`<ul class="check" style="margin-top:6px;">${v.warnings.map(i=>item(i,'warn')).join('')}</ul>`:''}
+    ${!v.errors.length&&!v.warnings.length?`<div class="flex">${ic('check')}<span>Няма забележки.</span></div>`:''}
+  </div>`;
+}
+function renderValidation(v, targetId){
+  const box=document.getElementById(targetId); if(!box) return;
+  box.innerHTML=validationHtml(v);
+  box.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
 const loading = ()=>`<div class="card"><div class="skel" style="width:40%;margin-bottom:12px;"></div><div class="skel" style="width:70%;margin-bottom:8px;"></div><div class="skel" style="width:55%;"></div></div>`;
 const empty = (msg)=>`<div class="empty">${ic('doc')}<div>${esc(msg)}</div></div>`;
 
@@ -1665,8 +1686,15 @@ async function prepareNapPackage(periodId){
       <div class="hint" style="margin-top:10px;">Подаването се извършва от вас в портала на НАП с КЕП — системата само подготвя пакета.</div>
       <div class="flex" style="margin-top:12px;">
         <button id="nap-do" class="primary" ${errs.length?'disabled':''}>${ic('doc')}Подготви пакет за НАП</button>
+        <button id="nap-check">${ic('shield')}Провери файловете</button>
         <button class="ghost" onclick="document.getElementById('nap-prep').remove()">Затвори</button></div>
+      <div id="nap-check-out"></div>
       <div id="nap-done"></div></div>`;
+    document.getElementById('nap-check').onclick=async(e)=>{
+      const b=e.currentTarget; b.disabled=true; b.textContent='Проверява…';
+      try{ renderValidation(await api(`/submissions/vat/${periodId}/validate`), 'nap-check-out'); }
+      catch(err){ toast(err.message,true); }
+      finally{ b.disabled=false; b.innerHTML=ic('shield')+'Провери файловете'; } };
     const btn=document.getElementById('nap-do');
     if(btn) btn.onclick=async()=>{
       btn.disabled=true; btn.textContent='Подготвя…';
@@ -1870,7 +1898,7 @@ async function viewIncome73(main){
 /* ==================== ОТЧЕТИ (P&L / Баланс / Паричен поток) ==================== */
 let repTab='pnl', pnlMode='nss';
 async function viewReports(main){
-  const tabs=[['pnl','ОПР'],['balance','Баланс'],['cashflow','Паричен поток'],['tb','Оборотна ведомост']];
+  const tabs=[['pnl','ОПР'],['balance','Баланс'],['cashflow','Паричен поток'],['tb','Оборотна ведомост'],['saft','SAF-T']];
   main.innerHTML=pageH('Отчети','Финансови отчети от осчетоводените операции')+`
     <div class="toolbar"><div class="field" style="margin:0"><label>От дата</label><input id="r-from" type="date"/></div>
       <div class="field" style="margin:0"><label>До дата</label><input id="r-to" type="date"/></div>
@@ -1911,6 +1939,8 @@ async function viewReports(main){
             <table><thead><tr><th>Дейност</th><th class="num">Притоци</th><th class="num">Оттоци</th><th class="num">Нето</th></tr></thead><tbody>
             ${cf.sections.map(s=>`<tr><td class="strong">${esc(s.title)}</td><td class="num" style="color:var(--good)">${fmt(s.inflow)}</td><td class="num" style="color:var(--bad)">${fmt(s.outflow)}</td><td class="num">${fmt(s.net)}</td></tr>`).join('')}
             <tr style="font-weight:700"><td>Нетно изменение</td><td colspan="2"></td><td class="num">${fmt(cf.net_change)}</td></tr></tbody></table></div>`;
+      } else if(repTab==='saft'){
+        await renderSaft(box);
       } else {
         const tb=await api('/reports/trial-balance'+q);
         box.innerHTML=`<div class="card">${tb.rows.length?`<table><thead><tr><th>Сметка</th><th>Наименование</th><th class="num">Дт</th><th class="num">Кт</th><th class="num">Салдо</th></tr></thead><tbody>${tb.rows.map(r=>`<tr><td class="strong">${esc(r.code)}</td><td>${esc(r.name)}</td><td class="num">${fmt(r.debit_turnover)}</td><td class="num">${fmt(r.credit_turnover)}</td><td class="num">${fmt(r.closing_balance)}</td></tr>`).join('')}<tr style="font-weight:700"><td colspan="2">ОБЩО</td><td class="num">${fmt(tb.total_debit_turnover)}</td><td class="num">${fmt(tb.total_credit_turnover)}</td><td class="num">${tb.is_balanced?'<span class="badge-ok">баланс</span>':'<span class="badge-bad">небаланс</span>'}</td></tr></tbody></table>`:empty('Няма данни.')}</div>`;
@@ -1918,6 +1948,41 @@ async function viewReports(main){
     }catch(e){ box.innerHTML=`<div class="card">${empty(e.message)}</div>`; }
   };
   document.getElementById('r-load').onclick=load; load();
+}
+
+/* ---------- SAF-T (одитен файл) ---------- */
+async function renderSaft(box){
+  const from=document.getElementById('r-from').value, to=document.getElementById('r-to').value;
+  if(!from||!to){
+    box.innerHTML=`<div class="card">${empty('Задай начална и крайна дата на периода горе, за да се подготви SAF-T файлът.')}</div>`;
+    return;
+  }
+  const q=`?date_from=${from}&date_to=${to}`;
+  let pv=null;
+  try{ pv=await api('/submissions/saft/preview'+q); }
+  catch(e){ box.innerHTML=`<div class="card">${empty(e.message)}</div>`; return; }
+
+  box.innerHTML=`<div class="card">
+    <div class="card-t"><h3>SAF-T одитен файл</h3>
+      <div class="flex"><span class="pill s-violet na">версия ${esc(pv.version)}</span>
+        <span class="pill s-gray na">${Math.max(1,Math.round(pv.size_bytes/1024))} KB</span></div></div>
+    <div class="hint" style="margin-bottom:10px;">Стандартизиран одитен файл за данъчни цели. НАП го въвежда поетапно —
+      системата го подготвя отсега, а форматът е версиониран: при нова схема се добавя нова версия,
+      а старата остава за минали периоди.</div>
+    <ul class="check">${pv.contents.map(c=>`<li>${ic('check')}<span>${esc(c)}</span></li>`).join('')}</ul>
+    ${pv.warnings.length?`<ul class="check" style="margin-top:8px;">${pv.warnings.map(w=>
+      `<li style="color:var(--warn)">${ic('alert')}<span style="color:var(--ink-2)">${esc(w)}</span></li>`).join('')}</ul>`:''}
+    <div class="flex" style="margin-top:12px;">
+      <button id="saft-check" class="primary">${ic('shield')}Провери файла</button>
+      <button id="saft-dl">${ic('download')}Свали ${esc(pv.filename)}</button></div>
+    <div id="saft-val"></div></div>`;
+
+  document.getElementById('saft-dl').onclick=()=>blobDownload('/submissions/saft'+q, pv.filename);
+  document.getElementById('saft-check').onclick=async(e)=>{
+    const b=e.currentTarget; b.disabled=true; b.textContent='Проверява…';
+    try{ renderValidation(await api('/submissions/saft/validate'+q), 'saft-val'); }
+    catch(err){ toast(err.message,true); }
+    finally{ b.disabled=false; b.innerHTML=ic('shield')+'Провери файла'; } };
 }
 
 /* ==================== AI АНАЛИЗИ (CFO) ==================== */

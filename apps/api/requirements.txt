@@ -11,7 +11,8 @@ python-multipart==0.0.32
 psycopg[binary]==3.3.4
 anthropic==0.120.0
 fpdf2==2.8.7
-defusedxml==0.7.1        # безопасно парсване на качени XML файлове (CAMT извлечения)
+defusedxml==0.7.1        # безопасно парсване на качен XML (CAMT извлечения)
+xmlschema==4.3.2         # XSD валидация на изходните файлове преди подаване (чист Python)
 
 # dev / test
 pytest==9.1.1

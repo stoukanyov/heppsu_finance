@@ -30,6 +30,12 @@ from app.modules.companies.models import Company
 from app.modules.counterparties.models import Counterparty, CounterpartyType
 from app.modules.vat.models import VatCode
 from app.tax_engine.export.base import ExportProvider, ExportResult
+from app.tax_engine.export.validation import (
+    ERROR,
+    WARNING,
+    ValidationReport,
+    XsdSchema,
+)
 
 ZERO = Decimal("0.00")
 _POSTED = (EntryStatus.POSTED, EntryStatus.REVERSED, EntryStatus.REVERSAL)
@@ -64,6 +70,10 @@ class SaftBgV1Provider(ExportProvider):
     version = "1.0"
     media_type = "application/xml"
     namespace = "urn:StandardAuditFile-Taxation-Financial:BG"
+
+    # Официалната схема на НАП не се разпространява с кода — слага се ръчно тук.
+    # Докато я няма, `validate` не мълчи, а го казва и пуска структурните проверки.
+    schema = XsdSchema("saft-bg-1.0.xsd", "SAF-T България 1.0")
 
     # ------------------------------------------------------------------ секции
     def _header(self, root: ET.Element, company: Company, ctx: dict) -> None:
@@ -272,3 +282,150 @@ class SaftBgV1Provider(ExportProvider):
             ],
             warnings=warnings,
         )
+
+    # ------------------------------------------------------------------ валидация
+    def validate(self, xml: bytes) -> ValidationReport:
+        """Проверява готовия файл — първо срещу XSD, после структурно.
+
+        Работи върху самия байтов резултат, а не върху междинно състояние: това е
+        точно файлът, който ще бъде подаден. Структурните проверки не зависят от
+        схемата и вършат работа и докато официалният XSD липсва.
+        """
+        report = ValidationReport(
+            target=f"SAF-T България {self.version}",
+            schema_name=self.schema.name,
+            schema_present=self.schema.available,
+        )
+        report.extend(self.schema.validate(xml))
+
+        try:
+            root = ET.fromstring(xml)
+        except ET.ParseError as exc:
+            report.add(ERROR, f"Файлът не е валиден XML: {exc}")
+            return report
+
+        ns = f"{{{self.namespace}}}"
+
+        def _qualified(path: str) -> str:
+            """'a/b' → '{ns}a/{ns}b' — ElementTree иска namespace на всяко ниво."""
+            return "/".join(f"{ns}{part}" for part in path.split("/"))
+
+        def find(node, path: str):
+            return node.find(_qualified(path))
+
+        def findall(node, path: str):
+            return node.findall(_qualified(path))
+
+        def text(node, path: str) -> str:
+            found = find(node, path)
+            return (found.text or "").strip() if found is not None else ""
+
+        # --- задължителни реквизити в заглавната част ---
+        header = find(root, "Header")
+        if header is None:
+            report.add(ERROR, "Липсва секция <Header>", path="/AuditFile/Header")
+            return report
+        for path, label in (
+            ("Company/RegistrationNumber", "ЕИК на дружеството"),
+            ("Company/Name", "наименование на дружеството"),
+            ("DefaultCurrencyCode", "отчетна валута"),
+            ("SelectionCriteria/SelectionStartDate", "начална дата на периода"),
+            ("SelectionCriteria/SelectionEndDate", "крайна дата на периода"),
+        ):
+            if not text(header, path):
+                report.add(
+                    ERROR,
+                    f"Липсва задължителен реквизит: {label}",
+                    path=f"/AuditFile/Header/{path}",
+                )
+        if not text(header, "Company/TaxRegistration/TaxRegistrationNumber"):
+            report.add(
+                WARNING,
+                "Липсва ДДС номер — задължителен при регистрация по ЗДДС",
+                path="/AuditFile/Header/Company/TaxRegistration/TaxRegistrationNumber",
+            )
+
+        # --- дневникът трябва да балансира ---
+        gl = find(root, "GeneralLedgerEntries")
+        if gl is None:
+            report.add(ERROR, "Липсва секция <GeneralLedgerEntries>")
+            return report
+
+        declared_debit = _to_decimal(text(gl, "TotalDebit"))
+        declared_credit = _to_decimal(text(gl, "TotalCredit"))
+        if declared_debit != declared_credit:
+            report.add(
+                ERROR,
+                f"Дневникът не балансира: общо дебит {declared_debit} ≠ общо кредит "
+                f"{declared_credit}",
+                path="/AuditFile/GeneralLedgerEntries",
+            )
+
+        # --- контролните суми срещу действително записаните редове ---
+        actual_debit = actual_credit = ZERO
+        transactions = 0
+        for journal in findall(gl, "Journal"):
+            for tx in findall(journal, "Transaction"):
+                transactions += 1
+                for side, bucket in (("DebitLine", "debit"), ("CreditLine", "credit")):
+                    for line in findall(tx, side):
+                        amount = _to_decimal(text(line, "Amount/Amount"))
+                        if bucket == "debit":
+                            actual_debit += amount
+                        else:
+                            actual_credit += amount
+
+        if actual_debit != declared_debit:
+            report.add(
+                ERROR,
+                f"Обявеният общ дебит ({declared_debit}) не съвпада със сбора на редовете "
+                f"({actual_debit})",
+                path="/AuditFile/GeneralLedgerEntries/TotalDebit",
+            )
+        if actual_credit != declared_credit:
+            report.add(
+                ERROR,
+                f"Обявеният общ кредит ({declared_credit}) не съвпада със сбора на редовете "
+                f"({actual_credit})",
+                path="/AuditFile/GeneralLedgerEntries/TotalCredit",
+            )
+
+        declared_count = text(gl, "NumberOfEntries")
+        if declared_count and declared_count.isdigit() and int(declared_count) != transactions:
+            report.add(
+                ERROR,
+                f"Обявеният брой операции ({declared_count}) не съвпада с реално записаните "
+                f"({transactions})",
+                path="/AuditFile/GeneralLedgerEntries/NumberOfEntries",
+            )
+
+        # --- всяка сметка в дневника трябва да съществува в сметкоплана ---
+        chart = {
+            (a.findtext(f"{ns}AccountID") or "").strip()
+            for a in findall(root, "MasterFiles/GeneralLedgerAccounts/Account")
+        }
+        missing: set[str] = set()
+        for journal in findall(gl, "Journal"):
+            for tx in findall(journal, "Transaction"):
+                for side in ("DebitLine", "CreditLine"):
+                    for line in findall(tx, side):
+                        code = text(line, "AccountID")
+                        if code and code not in chart:
+                            missing.add(code)
+        for code in sorted(missing):
+            report.add(
+                ERROR,
+                f"Сметка {code} се ползва в дневника, но липсва в сметкоплана",
+                path="/AuditFile/MasterFiles/GeneralLedgerAccounts",
+            )
+
+        if transactions == 0:
+            report.add(WARNING, "В периода няма осчетоводени операции")
+        return report
+
+
+def _to_decimal(value: str) -> Decimal:
+    try:
+        return Decimal(value or "0")
+    except Exception:
+        return ZERO

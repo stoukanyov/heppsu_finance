@@ -111,6 +111,57 @@ def preview_saft(
     }
 
 
+def _report_to_dict(report) -> dict:
+    """Общ изход за всички проверки — една форма за UI-то."""
+    return {
+        "target": report.target,
+        "ok": report.ok,
+        "summary": report.summary(),
+        "schema_name": report.schema_name,
+        "schema_present": report.schema_present,
+        "errors": [
+            {"message": i.message, "path": i.path, "line": i.line, "source": i.source}
+            for i in report.errors
+        ],
+        "warnings": [
+            {"message": i.message, "path": i.path, "line": i.line, "source": i.source}
+            for i in report.warnings
+        ],
+    }
+
+
+@router.get("/saft/validate", dependencies=[require("reports.export")])
+def validate_saft(
+    ctx: CurrentCompany,
+    db: DbSession,
+    date_from: dt.date,
+    date_to: dt.date,
+    version: str | None = None,
+) -> dict:
+    """Проверява SAF-T файла, преди да бъде свален и подаден.
+
+    Сверява го със схемата на НАП, ако е инсталирана, и прилага структурните
+    проверки (баланс на дневника, контролни суми, задължителни реквизити), които
+    важат независимо от схемата.
+    """
+    from app.tax_engine.export.registry import get_export_provider
+
+    provider = get_export_provider("SAFT_BG", version)
+    result = provider.export(
+        ctx.company, {"db": db, "date_from": date_from, "date_to": date_to}
+    )
+    report = provider.validate(result.content)
+    return {**_report_to_dict(report), "filename": result.filename, "version": provider.version}
+
+
+@router.get("/vat/{period_id}/validate", dependencies=[require("vat.view")])
+def validate_vat_package(period_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> dict:
+    """Проверява пакета за НАП по ЗДДС: дължини на полета, кодировка, контролни суми."""
+    from app.modules.vat import service as vat_service
+
+    return _report_to_dict(vat_service.validate_nap_package(db, ctx.company.id, period_id))
+
+
 @router.get("/vat/{period_id}/preview", response_model=SubmissionPreviewOut, dependencies=[require("vat.view")])
 def preview_vat(period_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> SubmissionPreviewOut:
     """Финален преглед и контролни проверки преди подготовката на пакета."""

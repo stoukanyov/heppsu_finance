@@ -13,6 +13,7 @@ from app.modules.vat import nap_export
 from app.modules.vat.models import VatEntry
 from app.modules.vat.nap_export import DeclarationCells
 from app.tax_engine.base import TaxJurisdiction, TaxProvider
+from app.tax_engine.export.validation import ValidationReport
 
 
 class BulgariaTaxProvider(TaxProvider):
@@ -30,6 +31,11 @@ class BulgariaTaxProvider(TaxProvider):
         self, company: Company, period_code: str, entries: list[VatEntry]
     ) -> tuple[bytes, DeclarationCells]:
         return nap_export.build_nap_zip(company, period_code, entries)
+
+    def validate_filing_package(
+        self, company: Company, period_code: str, entries: list[VatEntry]
+    ) -> ValidationReport:
+        return nap_export.validate_nap_files(company, period_code, entries)
 
     @property
     def filing_filename(self) -> str:
