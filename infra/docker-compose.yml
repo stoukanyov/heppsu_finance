@@ -54,7 +54,10 @@ services:
   # при няколко uvicorn работника иначе няколко процеса тръгват едновременно към
   # една и съща схема.
   migrate:
-    image: ${AIFOS_IMAGE:-aifos-api:latest}
+    # БЕЗ стойност по подразбиране нарочно: `aifos-api:latest` е образ от друга
+    # среда и мълчаливо връща старите миграции — при рестарт без AIFOS_IMAGE
+    # `alembic` не намира ревизията, на която е базата, и стекът не тръгва.
+    image: ${AIFOS_IMAGE:?AIFOS_IMAGE липсва — вдигай стека през infra/deploy.sh}
     restart: "no"
     logging: *default-logging
     env_file: [./.env]
@@ -67,7 +70,10 @@ services:
     build:
       context: ./release/apps/api
       dockerfile: Dockerfile
-    image: ${AIFOS_IMAGE:-aifos-api:latest}
+    # БЕЗ стойност по подразбиране нарочно: `aifos-api:latest` е образ от друга
+    # среда и мълчаливо връща старите миграции — при рестарт без AIFOS_IMAGE
+    # `alembic` не намира ревизията, на която е базата, и стекът не тръгва.
+    image: ${AIFOS_IMAGE:?AIFOS_IMAGE липсва — вдигай стека през infra/deploy.sh}
     restart: unless-stopped
     logging: *default-logging
     env_file: [./.env]

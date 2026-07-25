@@ -98,10 +98,13 @@ class Api:
 # ─────────────────────────────── Демо съдържание ──────────────────────────────
 DEMO_EIK = invalid_eik("30112233")
 
+# Домейнът е `demo.example.com`: `example.com` е запазен по RFC 2606 и не може да
+# принадлежи на никого. `.local` не става — валидаторът на имейли го отхвърля като
+# запазена зона.
 USERS = [
-    ("upravitel@demo.aifos.local", "Мария Демирова", "MANAGER", "demo-upravitel-2026"),
-    ("schetovoditel@demo.aifos.local", "Петър Ковачев", "CHIEF_ACCOUNTANT", "demo-schetovoditel-2026"),
-    ("sluzhitel@demo.aifos.local", "Ана Тодорова", "EMPLOYEE", "demo-sluzhitel-2026"),
+    ("upravitel@demo.example.com", "Мария Демирова", "MANAGER", "demo-upravitel-2026"),
+    ("schetovoditel@demo.example.com", "Петър Ковачев", "CHIEF_ACCOUNTANT", "demo-schetovoditel-2026"),
+    ("sluzhitel@demo.example.com", "Ана Тодорова", "EMPLOYEE", "demo-sluzhitel-2026"),
 ]
 
 CUSTOMERS = [
@@ -156,7 +159,7 @@ def main(base: str) -> int:
             expect=(201, 409))
     owner_email, _, _, owner_pass = USERS[0]
     api.token = api("/auth/login", {"email": owner_email, "password": owner_pass})["access_token"]
-    print(f"  потребители: {len(USERS)} (домейн @demo.aifos.local)")
+    print(f"  потребители: {len(USERS)} (домейн @demo.example.com)")
 
     # ── Дружество ────────────────────────────────────────────────────────────
     company = api("/companies", {
