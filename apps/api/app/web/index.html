@@ -564,8 +564,79 @@
 <script>
 const API = '/api/v1';
 let token = localStorage.getItem('aifos_token') || null;
+let refreshToken = localStorage.getItem('aifos_refresh') || null;
 let companyId = localStorage.getItem('aifos_company') || null;
 let companies = [], me = null, accountsCache = null, myAccess = null;
+
+/* ---------- подновяване на достъпа ----------
+   Access токенът е кратък и неотменяем; refresh токенът е дълъг и отменяем.
+   Сървърът ротира refresh токена при всяка употреба и третира повторната
+   употреба като кражба — отменя цялото семейство. Затова подновяването е
+   single-flight: две едновременни заявки биха си причинили пълно излизане.
+
+   Токените стоят в localStorage, както и досега. Това ги оставя достъпни за
+   XSS; правилното решение е httpOnly бисквитка, но то иска промени и в
+   сървъра (CSRF защита, SameSite). Дотогава кратък access токен + отменяем
+   refresh е осезаемо по-добре от 12-часов JWT, който никой не може да спре. */
+const RENEW_WINDOW_MS = 2 * 60 * 1000;   // подновяваме толкова преди изтичане
+let refreshInFlight = null;
+
+function saveTokens(access, refresh){
+  token = access || null;
+  if(token) localStorage.setItem('aifos_token', token); else localStorage.removeItem('aifos_token');
+  if(refresh !== undefined){
+    refreshToken = refresh || null;
+    if(refreshToken) localStorage.setItem('aifos_refresh', refreshToken);
+    else localStorage.removeItem('aifos_refresh');
+  }
+}
+
+/** Изтичането от JWT payload-а. Без проверка на подписа — служи само за
+    локалното решение „време ли е за подновяване“; истинската проверка е на сървъра. */
+function jwtExpiry(jwt){
+  try{
+    const part = jwt.split('.')[1];
+    const json = atob(part.replace(/-/g,'+').replace(/_/g,'/'));
+    const exp = JSON.parse(json).exp;
+    return typeof exp === 'number' ? exp * 1000 : null;
+  }catch{ return null; }
+}
+
+async function doRefresh(){
+  if(!refreshToken) return false;
+  try{
+    const res = await fetch(API+'/auth/refresh', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({refresh_token: refreshToken})
+    });
+    if(!res.ok) return false;
+    const data = await res.json();
+    if(!data.access_token) return false;
+    // Записваме и двата: старият refresh вече е отменен от сървъра.
+    saveTokens(data.access_token, data.refresh_token || null);
+    return true;
+  }catch{
+    // Мрежова грешка не е повод да изхвърляме потребителя.
+    return false;
+  }
+}
+
+function refreshOnce(){
+  if(!refreshInFlight){
+    refreshInFlight = doRefresh().finally(()=>{ refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
+/** Подновява предварително, ако токенът изтича до RENEW_WINDOW_MS.
+    Така обичайният случай не минава през 401 → refresh → повтори. */
+async function ensureFreshToken(){
+  if(!token || !refreshToken) return;
+  const exp = jwtExpiry(token);
+  if(exp === null) return;              // непрочетим токен — оставяме на сървъра
+  if(exp - Date.now() > RENEW_WINDOW_MS) return;
+  await refreshOnce();
+}
 
 /* ---------- icons ---------- */
 const ICON = {
@@ -658,15 +729,32 @@ function toast(msg, err){
   document.getElementById('toast').appendChild(t); setTimeout(()=>t.remove(), 3600);
 }
 async function api(path,{method='GET',body,form}={}){
-  const headers={}; if(token) headers['Authorization']='Bearer '+token; if(companyId) headers['X-Company-Id']=companyId;
-  const opts={method,headers};
-  if(form) opts.body=form; else if(body!==undefined){ headers['Content-Type']='application/json'; opts.body=JSON.stringify(body); }
-  const res=await fetch(API+path,opts); const text=await res.text();
+  await ensureFreshToken();
+
+  const send=()=>{
+    const headers={}; if(token) headers['Authorization']='Bearer '+token; if(companyId) headers['X-Company-Id']=companyId;
+    const opts={method,headers};
+    if(form) opts.body=form; else if(body!==undefined){ headers['Content-Type']='application/json'; opts.body=JSON.stringify(body); }
+    return fetch(API+path,opts);
+  };
+
+  let res=await send();
+  // Сървърът може да е обезсилил токена по-рано от очакваното (изход от друго
+  // устройство, смяна на парола). `FormData` също се препраща спокойно — за
+  // разлика от мобилния клиент тук тялото не е поток.
+  if(res.status===401 && refreshToken && path!=='/auth/refresh'){
+    if(await refreshOnce()) res=await send();
+  }
+
+  const text=await res.text();
   let data=null; try{ data=text?JSON.parse(text):null; }catch{ data=text; }
-  if(!res.ok){ const msg=(data&&data.detail)?(Array.isArray(data.detail)?data.detail.map(d=>d.msg).join('; '):data.detail):('Грешка '+res.status); throw new Error(msg); }
+  if(!res.ok){
+    if(res.status===401 && path!=='/auth/login') logout();
+    const msg=(data&&data.detail)?(Array.isArray(data.detail)?data.detail.map(d=>d.msg).join('; '):data.detail):('Грешка '+res.status); throw new Error(msg); }
   return data;
 }
 async function blobDownload(path, filename){
+  await ensureFreshToken();
   const res=await fetch(API+path,{headers:{Authorization:'Bearer '+token,'X-Company-Id':companyId}});
   if(!res.ok){ toast('Грешка при генериране на файла',true); return; }
   const url=URL.createObjectURL(await res.blob()); const a=document.createElement('a');
@@ -852,7 +940,7 @@ document.getElementById('au-toggle').onclick=(e)=>{ e.preventDefault(); register
 document.getElementById('au-submit').onclick=async()=>{
   const email=document.getElementById('au-email').value.trim(), password=document.getElementById('au-pass').value;
   try{ if(registerMode){ await api('/auth/register',{method:'POST',body:{email,password,full_name:document.getElementById('au-name').value||null}}); }
-    const r=await api('/auth/login',{method:'POST',body:{email,password}}); token=r.access_token; localStorage.setItem('aifos_token',token); await boot();
+    const r=await api('/auth/login',{method:'POST',body:{email,password}}); saveTokens(r.access_token, r.refresh_token || null); await boot();
   }catch(e){ toast(e.message,true); } };
 document.querySelectorAll('#au-email,#au-pass').forEach(i=>i.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('au-submit').click();}));
 
@@ -933,7 +1021,19 @@ function can(perm){
   const p=myAccess.permissions||[];
   return p.includes('*')||p.includes(perm)||p.includes(perm.split('.')[0]+'.*');
 }
-function logout(){ token=null; companyId=null; localStorage.removeItem('aifos_token'); localStorage.removeItem('aifos_company');
+function logout(){
+  // Отменяме refresh токена на сървъра — иначе остава валиден до изтичането си
+  // (30 дни), дори след „изход". Не чакаме отговора: изходът не бива да зависи
+  // от мрежата, а токенът и без това се изтрива локално.
+  const stale = refreshToken;
+  if(stale){
+    fetch(API+'/auth/logout',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({refresh_token: stale, all_devices:false})
+    }).catch(()=>{});
+  }
+  token=null; refreshToken=null; companyId=null;
+  localStorage.removeItem('aifos_token'); localStorage.removeItem('aifos_refresh'); localStorage.removeItem('aifos_company');
   document.getElementById('shell').style.display='none'; document.getElementById('auth').style.display='grid'; }
 document.getElementById('top-avatar').onclick=logout;
 document.getElementById('userchip').onclick=()=>navigate('team');
@@ -1857,6 +1957,7 @@ async function viewIncome73(main){
   };
   document.getElementById('i73-dl').onclick=async()=>{
     const payload={ year:+document.getElementById('i73-year').value, persons:inc73 };
+    await ensureFreshToken();
     try{ const res=await fetch(`${API}/income-reports/chl73-6/xml`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'X-Company-Id':companyId},body:JSON.stringify(payload)});
       if(!res.ok){ const e=await res.json().catch(()=>({})); toast(e.detail||'Грешка',true); return; }
       const url=URL.createObjectURL(await res.blob()); const a=document.createElement('a'); a.href=url; a.download='SPR73_6.xml'; document.body.appendChild(a); a.click(); a.remove();
