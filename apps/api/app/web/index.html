@@ -632,6 +632,7 @@ const NAV = [
   ]},
   {sec:'Кантора', items:[
     ['firm','Моите клиенти','panel'],
+    ['onboarding','Въвеждане на клиент','userPlus','company.view'],
   ]},
   {sec:'Документи', items:[
     ['documents','Документи','doc','documents.view'],
@@ -982,7 +983,7 @@ document.getElementById('company-select').onchange=async(e)=>{ companyId=e.targe
 let currentView='dashboard';
 const VIEWS={ dashboard:viewDashboard, accounting:viewAccounting, contacts:viewContacts, invoices:viewInvoices,
   purchases:viewPurchases, banking:viewBanking, payments:viewPayments, stores:viewStores, vat:viewVat, refunds:viewRefunds, income73:viewIncome73, reports:viewReports,
-  analytics:viewAnalytics, documents:viewDocuments, payroll:viewPayroll, firm:viewFirm,
+  analytics:viewAnalytics, documents:viewDocuments, payroll:viewPayroll, firm:viewFirm, onboarding:viewOnboarding,
   team:viewTeam, admin:viewAdmin, audit:viewAudit };
 function navigate(view){
   currentView=view; location.hash=view;
@@ -2466,6 +2467,171 @@ async function prRateSetForm(existing){
           closeModal(); toast('Параметрите са запазени'); navigate('payroll');
         }catch(e){ toast(e.message,true); } };
     }});
+}
+
+/* ==================== ВЪВЕЖДАНЕ НА КЛИЕНТ ==================== */
+/* Стъпките между „системата работи" и „в системата има истинска фирма". */
+let onbTab='setup';
+
+async function viewOnboarding(main){
+  const tabs=[['setup','Настройка'],['balances','Начални салда'],['migrate','Миграция'],['health','Проверка на данните']];
+  main.innerHTML=pageH('Въвеждане на клиент','Настройка, начални салда, миграция от предишен софтуер и проверка на данните')+`
+    <div class="tabs" style="margin-bottom:16px;">${tabs.map(([k,l])=>
+      `<div class="tab ${onbTab===k?'active':''}" data-tab="${k}">${esc(l)}</div>`).join('')}</div>
+    <div id="onb-body">${loading()}</div>`;
+  main.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ onbTab=b.dataset.tab; viewOnboarding(main); });
+  const box=document.getElementById('onb-body');
+  try{
+    if(onbTab==='setup') await onbSetup(box);
+    else if(onbTab==='balances') onbBalances(box);
+    else if(onbTab==='migrate') onbMigrate(box);
+    else await onbHealth(box);
+  }catch(e){ box.innerHTML=empty(e.message); }
+}
+
+async function onbSetup(box){
+  const s=await api('/onboarding/status');
+  box.innerHTML=`
+    <div class="card kpi" style="margin-bottom:16px;"><div class="top">
+      <div><div class="l">Готовност на ${esc(s.company)}</div>
+        <div class="v">${s.completed} от ${s.total}</div></div>
+      <div class="chip ${s.ready?'c-green':'c-amber'}">${ic(s.ready?'check':'alert')}</div></div>
+      <div class="hint">${s.ready?'Задължителните стъпки са изпълнени — може да се работи.':'Има незавършени задължителни стъпки.'}</div></div>
+    <div class="card"><div class="card-t"><h3>Стъпки</h3></div>
+      <table><tbody>${s.steps.map(st=>`<tr>
+        <td style="width:34px;">${st.done?`<span style="color:var(--good)">${ic('check')}</span>`:
+          st.required?`<span style="color:var(--bad)">${ic('alert')}</span>`:`<span class="muted-2">${ic('clock')}</span>`}</td>
+        <td class="strong">${esc(st.title)}${st.required?'':' <span class="pill s-gray na">по избор</span>'}</td>
+        <td class="muted">${esc(st.detail)}</td>
+        <td class="muted-2">${esc(st.action)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+
+function onbBalances(box){
+  box.innerHTML=`
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-t"><h3>Начални салда</h3></div>
+      <div class="hint" style="margin-bottom:12px;">Качи оборотна ведомост от предишния софтуер или въведи редовете ръчно.
+        Колоните се разпознават по име (Сметка/Дебит/Кредит). <b>Балансът се проверява преди осчетоводяване</b> —
+        небалансирано начално салдо се открива месеци по-късно.</div>
+      <div class="row">
+        <div class="field grow"><label>CSV файл</label><input id="ob-file" type="file" accept=".csv,text/csv"></div>
+        <div class="field" style="min-width:110px;"><label>Разделител</label><input id="ob-delim" value=";" maxlength="1"></div>
+        <div class="field" style="min-width:150px;"><label>Десетичен знак</label>
+          <select id="ob-comma"><option value="true">запетая (1 234,56)</option><option value="false">точка (1234.56)</option></select></div>
+        <button id="ob-parse" class="primary" style="align-self:flex-end;">${ic('import')}Прочети и провери</button>
+      </div>
+      <div class="hint" style="margin-top:10px;">Или въведи ръчно, по ред на всеки: <code>код;дебит;кредит</code></div>
+      <textarea id="ob-manual" rows="5" style="width:100%;margin-top:6px;font-family:ui-monospace,monospace;" placeholder="501;1000.00;&#10;401;;1000.00"></textarea>
+      <div class="flex" style="margin-top:8px;"><button id="ob-manual-check">Провери въведеното</button></div>
+    </div>
+    <div id="ob-out"></div>`;
+
+  const show=(v)=>{
+    const out=document.getElementById('ob-out');
+    out.innerHTML=`<div class="card" style="border-color:var(--${v.can_post?'good':'bad'});">
+      <div class="card-t"><h3>Проверка</h3>
+        <div class="flex">${v.balanced?'<span class="pill s-green">балансът излиза</span>':
+          `<span class="pill s-red">разлика ${fmt(v.difference)}</span>`}</div></div>
+      ${v.problems.length?`<ul class="check" style="margin-bottom:10px;">${v.problems.map(p=>
+        `<li style="color:var(--bad)">${ic('alert')}<span style="color:var(--ink-2)">${esc(p)}</span></li>`).join('')}</ul>`:''}
+      ${v.rows.length?`<table><thead><tr><th>Сметка</th><th>Наименование</th><th class="num">Дебит</th><th class="num">Кредит</th></tr></thead><tbody>
+        ${v.rows.map(r=>`<tr><td class="strong">${esc(r.code)}</td><td>${esc(r.name)}</td>
+          <td class="num">${Number(r.debit)?fmt(r.debit):''}</td><td class="num">${Number(r.credit)?fmt(r.credit):''}</td></tr>`).join('')}
+        <tr style="font-weight:700"><td colspan="2">ОБЩО</td><td class="num">${fmt(v.total_debit)}</td><td class="num">${fmt(v.total_credit)}</td></tr>
+        </tbody></table>`:empty('Няма редове.')}
+      ${v.can_post?`<div class="row" style="margin-top:12px;">
+        <div class="field" style="margin:0;"><label>Дата</label><input id="ob-date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+        <button id="ob-post" class="primary" style="align-self:flex-end;">Осчетоводи началните салда</button></div>`:''}
+    </div>`;
+    const btn=document.getElementById('ob-post');
+    if(btn) btn.onclick=async()=>{
+      btn.disabled=true;
+      try{ const e=await api('/onboarding/opening-balances',{method:'POST',body:{
+            on_date:document.getElementById('ob-date').value,
+            rows:v.rows.map(r=>({account_code:r.code, debit:r.debit, credit:r.credit}))}});
+        toast('Началните салда са осчетоводени · операция №'+(e.entry_number??''));
+        navigate('onboarding');
+      }catch(err){ toast(err.message,true); btn.disabled=false; } };
+  };
+
+  document.getElementById('ob-parse').onclick=async()=>{
+    const f=document.getElementById('ob-file').files[0];
+    if(!f){ toast('Избери файл',true); return; }
+    const fd=new FormData(); fd.append('file',f);
+    fd.append('delimiter',document.getElementById('ob-delim').value||';');
+    fd.append('decimal_comma',document.getElementById('ob-comma').value);
+    try{ show(await api('/onboarding/opening-balances/parse-csv',{method:'POST',form:fd})); }
+    catch(e){ toast(e.message,true); } };
+
+  document.getElementById('ob-manual-check').onclick=async()=>{
+    const rows=document.getElementById('ob-manual').value.split('\n')
+      .map(l=>l.trim()).filter(Boolean).map(l=>{ const [code,d,c]=l.split(';');
+        return {account_code:(code||'').trim(), debit:(d||'0').trim()||'0', credit:(c||'0').trim()||'0'}; });
+    if(!rows.length){ toast('Въведи поне един ред',true); return; }
+    try{ show(await api('/onboarding/opening-balances/preview',{method:'POST',body:{rows}})); }
+    catch(e){ toast(e.message,true); } };
+}
+
+function onbMigrate(box){
+  box.innerHTML=`<div class="card">
+    <div class="card-t"><h3>Импорт на контрагенти</h3></div>
+    <div class="hint" style="margin-bottom:12px;">Изнеси контрагентите от предишния софтуер като CSV и посочи кои колони
+      какво съдържат. <b>Съществуващите не се променят</b> — дубликатите по ЕИК или ДДС номер се пропускат и влизат в отчета.</div>
+    <div class="row">
+      <div class="field grow"><label>CSV файл</label><input id="mg-file" type="file" accept=".csv,text/csv"></div>
+      <div class="field" style="min-width:110px;"><label>Разделител</label><input id="mg-delim" value=";" maxlength="1"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Колона с наименование</label><input id="mg-name" value="Име"></div>
+      <div class="field"><label>Колона с ЕИК</label><input id="mg-eik" value="ЕИК"></div>
+      <div class="field"><label>Колона с ДДС номер</label><input id="mg-vat"></div>
+      <div class="field"><label>Колона с адрес</label><input id="mg-addr"></div>
+      <div class="field" style="min-width:150px;"><label>Тип</label>
+        <select id="mg-type"><option value="BOTH">клиент и доставчик</option>
+          <option value="CUSTOMER">клиент</option><option value="SUPPLIER">доставчик</option></select></div>
+    </div>
+    <button id="mg-go" class="primary">${ic('import')}Импортирай</button>
+    <div id="mg-out"></div></div>`;
+
+  document.getElementById('mg-go').onclick=async(e)=>{
+    const f=document.getElementById('mg-file').files[0];
+    if(!f){ toast('Избери файл',true); return; }
+    const b=e.currentTarget; b.disabled=true;
+    const fd=new FormData(); fd.append('file',f);
+    const v=id=>document.getElementById(id).value.trim();
+    fd.append('name_column',v('mg-name')); fd.append('delimiter',v('mg-delim')||';');
+    if(v('mg-eik')) fd.append('eik_column',v('mg-eik'));
+    if(v('mg-vat')) fd.append('vat_column',v('mg-vat'));
+    if(v('mg-addr')) fd.append('address_column',v('mg-addr'));
+    fd.append('type_value',document.getElementById('mg-type').value);
+    try{
+      const r=await api('/onboarding/counterparties/import-csv',{method:'POST',form:fd});
+      document.getElementById('mg-out').innerHTML=`<div class="card" style="margin-top:14px;background:var(--good-soft);border-color:var(--good);">
+        <div class="flex">${ic('check')}<b>Внесени ${r.created}, пропуснати ${r.skipped}</b></div>
+        ${r.problems.length?`<ul class="check" style="margin-top:8px;">${r.problems.map(p=>
+          `<li style="color:var(--warn)">${ic('alert')}<span style="color:var(--ink-2)">${esc(p)}</span></li>`).join('')}</ul>`:''}
+        <div class="hint" style="margin-top:8px;">${esc(r.note)}</div></div>`;
+      toast(`Внесени ${r.created} контрагента`);
+    }catch(err){ toast(err.message,true); }
+    finally{ b.disabled=false; } };
+}
+
+async function onbHealth(box){
+  const h=await api('/onboarding/health');
+  const color={ERROR:'bad',WARNING:'warn',INFO:'ink-3'};
+  box.innerHTML=`
+    <div class="card kpi" style="margin-bottom:16px;"><div class="top">
+      <div><div class="l">Състояние на данните</div>
+        <div class="v" style="color:var(--${h.healthy?'good':'bad'})">${h.healthy?'Няма блокиращи проблеми':h.errors+' грешки'}</div></div>
+      <div class="chip ${h.healthy?'c-green':'c-red'}">${ic(h.healthy?'check':'alert')}</div></div>
+      <div class="hint">${h.warnings} предупреждения. Предупрежденията не блокират, но изкривяват отчетите.</div></div>
+    <div class="card"><div class="card-t"><h3>Находки</h3></div>
+      ${h.issues.length?`<table><thead><tr><th>Ниво</th><th>Какво</th><th class="num">Брой</th><th>Какво значи</th></tr></thead><tbody>
+        ${h.issues.map(i=>`<tr>
+          <td><span class="pill ${i.level==='ERROR'?'s-red':i.level==='WARNING'?'s-amber':'s-gray'}">${esc(i.level)}</span></td>
+          <td class="strong">${esc(i.title)}</td><td class="num strong">${i.count}</td>
+          <td class="muted">${esc(i.hint)}</td></tr>`).join('')}</tbody></table>`
+        :`<div class="flex">${ic('check')}<span>Всичко е наред.</span></div>`}</div>`;
 }
 
 /* ==================== КАНТОРА: МОИТЕ КЛИЕНТИ ==================== */
