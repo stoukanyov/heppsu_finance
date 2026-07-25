@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # Категории (стабилни стойности — мобилният клиент филтрира и оцветява по тях).
 CATEGORY_VAT = "VAT"
@@ -33,3 +33,18 @@ class DeadlineOut(BaseModel):
     conditional: bool               # True = важи само при определени обстоятелства
     conditional_note: str | None = None  # кога важи, напр. „ако има ВОД за периода“
     days_remaining: int             # спрямо reference_date; отрицателно = просрочен
+    filed: bool = False             # отметнат като подаден
+    filed_at: dt.datetime | None = None
+
+
+class FilingRequest(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class FilingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str
+    filed_at: dt.datetime
+    note: str | None
