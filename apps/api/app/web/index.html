@@ -630,6 +630,9 @@ const NAV = [
   {sec:'ТРЗ', items:[
     ['payroll','Заплати','users','payroll.view'],
   ]},
+  {sec:'Кантора', items:[
+    ['firm','Моите клиенти','panel'],
+  ]},
   {sec:'Документи', items:[
     ['documents','Документи','doc','documents.view'],
   ]},
@@ -979,14 +982,16 @@ document.getElementById('company-select').onchange=async(e)=>{ companyId=e.targe
 let currentView='dashboard';
 const VIEWS={ dashboard:viewDashboard, accounting:viewAccounting, contacts:viewContacts, invoices:viewInvoices,
   purchases:viewPurchases, banking:viewBanking, payments:viewPayments, stores:viewStores, vat:viewVat, refunds:viewRefunds, income73:viewIncome73, reports:viewReports,
-  analytics:viewAnalytics, documents:viewDocuments, payroll:viewPayroll, team:viewTeam, admin:viewAdmin, audit:viewAudit };
+  analytics:viewAnalytics, documents:viewDocuments, payroll:viewPayroll, firm:viewFirm,
+  team:viewTeam, admin:viewAdmin, audit:viewAudit };
 function navigate(view){
   currentView=view; location.hash=view;
   document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===view));
   const main=document.getElementById('main');
   setRail('');                       // всеки екран сам решава дали ползва контекстна колона
   window.scrollTo({top:0});
-  if(!companyId){
+  // Таблото на кантората е над отделния клиент — то работи и без избрано дружество.
+  if(!companyId && view!=='firm'){
     main.innerHTML=`<div class="card"><div class="empty">${ic('bank')}<div>Създай или избери дружество, за да започнеш.</div>
       <button class="primary" style="margin:14px auto 0;" onclick="newCompany()">${ic('plus')}Ново дружество</button></div></div>`;
     return;
@@ -2461,6 +2466,180 @@ async function prRateSetForm(existing){
           closeModal(); toast('Параметрите са запазени'); navigate('payroll');
         }catch(e){ toast(e.message,true); } };
     }});
+}
+
+/* ==================== КАНТОРА: МОИТЕ КЛИЕНТИ ==================== */
+/* Екранът е нарочно над отделния клиент: кантората не работи „един клиент в даден
+   момент", а гледа кой какво чака. Затова тук няма X-Company-Id. */
+let firmTab='clients';
+
+const TASK_ST={OPEN:'s-blue',IN_PROGRESS:'s-amber',DONE:'s-green',CANCELLED:'s-gray'};
+const TASK_ST_BG={OPEN:'За правене',IN_PROGRESS:'В процес',DONE:'Готова',CANCELLED:'Отпаднала'};
+
+async function viewFirm(main){
+  const tabs=[['clients','Клиенти'],['tasks','Задачи'],['bulk','Групови действия']];
+  main.innerHTML=pageH('Моите клиенти','Всички дружества, до които имаш достъп — какво чака работа и кой е следващият срок')+`
+    <div class="tabs" style="margin-bottom:16px;">${tabs.map(([k,l])=>
+      `<div class="tab ${firmTab===k?'active':''}" data-tab="${k}">${esc(l)}</div>`).join('')}</div>
+    <div id="firm-body">${loading()}</div>`;
+  main.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ firmTab=b.dataset.tab; viewFirm(main); });
+  const body=document.getElementById('firm-body');
+  try{
+    if(firmTab==='clients') await firmClients(body);
+    else if(firmTab==='tasks') await firmTasks(body);
+    else await firmBulk(body);
+  }catch(e){ body.innerHTML=empty(e.message); }
+}
+
+function dueChip(days){
+  if(days===null||days===undefined) return '';
+  if(days<0) return `<span class="pill s-red">просрочен с ${Math.abs(days)} дни</span>`;
+  if(days===0) return '<span class="pill s-red">днес</span>';
+  if(days<=3) return `<span class="pill s-amber">след ${days} дни</span>`;
+  return `<span class="pill s-gray na">след ${days} дни</span>`;
+}
+
+async function firmClients(box){
+  const clients=await api('/firm/clients');
+  if(!clients.length){ box.innerHTML=empty('Още нямаш клиенти. Създай дружество или помоли да те добавят в екипа му.'); return; }
+  const attention=clients.filter(c=>c.needs_attention).length;
+  const soon=clients.filter(c=>c.deadline_soon).length;
+  const sum=(k)=>clients.reduce((a,c)=>a+c.totals[k],0);
+
+  box.innerHTML=`
+    <div class="kpis" style="margin-bottom:16px;">
+      <div class="card kpi"><div class="top"><div><div class="l">Клиенти</div><div class="v">${clients.length}</div></div><div class="chip c-blue">${ic('bank')}</div></div>
+        <div class="hint">${attention} с натрупана работа · ${soon} със срок до 3 дни</div></div>
+      <div class="card kpi"><div class="top"><div><div class="l">Документи за обработка</div><div class="v">${sum('pending_documents')}</div></div><div class="chip c-violet">${ic('doc')}</div></div></div>
+      <div class="card kpi"><div class="top"><div><div class="l">Неосчетоводени операции</div><div class="v">${sum('draft_entries')}</div></div><div class="chip c-amber">${ic('book')}</div></div></div>
+      <div class="card kpi"><div class="top"><div><div class="l">Несъгласувани движения</div><div class="v">${sum('unreconciled_transactions')}</div></div><div class="chip c-green">${ic('bank')}</div></div></div>
+    </div>
+    <div class="card"><div class="card-t"><h3>Клиенти</h3>
+      <div class="hint">Подредени по това кой чака най-много — не по азбучен ред.</div></div>
+      <div style="overflow-x:auto;"><table><thead><tr><th>Клиент</th><th class="num">Документи</th><th class="num">Чернови</th>
+        <th class="num">Банка</th><th class="num">Задачи</th><th>Следващ срок</th><th class="num"></th></tr></thead><tbody>
+        ${clients.map(c=>{
+          const t=c.totals, d=c.next_deadline;
+          const cell=(n)=>n?`<td class="num strong">${n}</td>`:'<td class="num muted-2">—</td>';
+          return `<tr${c.needs_attention?' style="background:var(--warn-soft,transparent);"':''}>
+            <td class="strong">${esc(c.name)}${c.eik?` <span class="muted-2">${esc(c.eik)}</span>`:''}
+              ${c.is_vat_registered?'<span class="pill s-violet na">ДДС</span>':''}</td>
+            ${cell(t.pending_documents)}${cell(t.draft_entries)}${cell(t.unreconciled_transactions)}
+            <td class="num">${t.open_tasks?`${t.open_tasks}${t.overdue_tasks?` <span class="pill s-red na">${t.overdue_tasks} просрочени</span>`:''}`:'<span class="muted-2">—</span>'}</td>
+            <td>${d?`${esc(d.title)}<div class="hint">${esc(d.due_date)} · ${dueChip(d.days_remaining)}</div>`:'<span class="muted-2">няма в следващите 90 дни</span>'}</td>
+            <td class="num"><button class="sm firm-open" data-id="${c.company_id}" data-name="${esc(c.name)}">Отвори</button></td></tr>`;
+        }).join('')}</tbody></table></div></div>`;
+
+  box.querySelectorAll('.firm-open').forEach(b=>b.onclick=()=>{
+    // Превключване на активния клиент — оттук нататък работиш в неговия контекст.
+    companyId=b.dataset.id; localStorage.setItem('aifos_company',companyId); accountsCache=null;
+    const sel=document.getElementById('company-select'); if(sel) sel.value=companyId;
+    toast('Активен клиент: '+b.dataset.name);
+    loadMyRole().then(()=>navigate('dashboard'));
+  });
+}
+
+async function firmTasks(box){
+  const [tasks,clients]=await Promise.all([api('/firm/tasks'),api('/firm/clients')]);
+  const names={}; clients.forEach(c=>names[c.company_id]=c.name);
+  box.innerHTML=`
+    <div class="card" style="margin-bottom:16px;"><div class="row">
+      <div class="field" style="margin:0;min-width:220px;"><label>Клиент</label>
+        <select id="ft-c">${clients.map(c=>`<option value="${c.company_id}">${esc(c.name)}</option>`).join('')}</select></div>
+      <button id="ft-gen">${ic('calendar')}Създай задачи от сроковете</button>
+      <button id="ft-new" class="primary">${ic('plus')}Нова задача</button>
+      <div class="hint" style="align-self:center;">Генерирането е идемпотентно — за един срок се създава най-много една отворена задача.</div>
+    </div></div>
+    <div class="card"><div class="card-t"><h3>Задачи</h3><span class="pill s-gray na">${tasks.length}</span></div>
+      ${tasks.length?`<table><thead><tr><th>Клиент</th><th>Задача</th><th>Срок</th><th>Статус</th><th class="num"></th></tr></thead><tbody>
+        ${tasks.map(t=>{
+          const overdue=t.due_date&&t.status!=='DONE'&&t.status!=='CANCELLED'&&t.due_date<new Date().toISOString().slice(0,10);
+          return `<tr><td class="strong">${esc(names[t.company_id]||'—')}</td>
+            <td>${esc(t.title)}${t.deadline_key?' <span class="pill s-violet na">срок</span>':''}</td>
+            <td>${t.due_date?esc(t.due_date):'<span class="muted-2">—</span>'}${overdue?' <span class="pill s-red na">просрочена</span>':''}</td>
+            <td><span class="pill ${TASK_ST[t.status]}">${esc(TASK_ST_BG[t.status]||t.status)}</span></td>
+            <td class="num">${t.status!=='DONE'?`<button class="sm ft-done" data-id="${t.id}">Готова</button> `:''}
+              <button class="sm ft-del" data-id="${t.id}">Изтрий</button></td></tr>`;
+        }).join('')}</tbody></table>`:empty('Няма задачи.')}</div>`;
+
+  document.getElementById('ft-gen').onclick=async(e)=>{
+    const b=e.currentTarget; b.disabled=true;
+    try{ const made=await api('/firm/tasks/from-deadlines',{method:'POST',
+        body:{company_id:document.getElementById('ft-c').value, days_ahead:30}});
+      toast(made.length?`Създадени ${made.length} задачи`:'Няма нови срокове — всичко вече е заведено');
+      firmTasks(box);
+    }catch(err){ toast(err.message,true); b.disabled=false; } };
+  document.getElementById('ft-new').onclick=()=>firmTaskForm(clients, box);
+  box.querySelectorAll('.ft-done').forEach(b=>b.onclick=async()=>{
+    try{ await api(`/firm/tasks/${b.dataset.id}`,{method:'PATCH',body:{status:'DONE'}}); firmTasks(box); }
+    catch(e){ toast(e.message,true); } });
+  box.querySelectorAll('.ft-del').forEach(b=>b.onclick=async()=>{
+    try{ await api(`/firm/tasks/${b.dataset.id}`,{method:'DELETE'}); firmTasks(box); }
+    catch(e){ toast(e.message,true); } });
+}
+
+function firmTaskForm(clients, box){
+  openModal({title:'Нова задача', body:`
+    <div class="field"><label>Клиент</label><select id="nt-c">${clients.map(c=>
+      `<option value="${c.company_id}">${esc(c.name)}</option>`).join('')}</select></div>
+    <div class="field"><label>Заглавие</label><input id="nt-t" placeholder="напр. Обработи банковото извлечение"></div>
+    <div class="field"><label>Описание</label><input id="nt-d"></div>
+    <div class="field"><label>Срок</label><input id="nt-due" type="date"></div>`,
+    footer:`<button data-close-btn>Откажи</button><button class="primary" id="nt-save">Запази</button>`,
+    onOpen:(bd)=>{
+      bd.querySelector('[data-close-btn]').onclick=closeModal;
+      bd.querySelector('#nt-save').onclick=async()=>{
+        const v=id=>bd.querySelector('#'+id).value.trim();
+        try{ await api('/firm/tasks',{method:'POST',body:{company_id:v('nt-c'), title:v('nt-t'),
+              description:v('nt-d')||null, due_date:v('nt-due')||null}});
+          closeModal(); toast('Задачата е създадена'); firmTasks(box);
+        }catch(e){ toast(e.message,true); } };
+    }});
+}
+
+async function firmBulk(box){
+  const now=new Date(); const prev=new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const period=`${prev.getFullYear()}-${String(prev.getMonth()+1).padStart(2,'0')}`;
+  box.innerHTML=`
+    <div class="card" style="margin-bottom:16px;"><div class="row">
+      <div class="field" style="margin:0;min-width:150px;"><label>Данъчен период</label><input id="fb-p" value="${period}" placeholder="ГГГГ-ММ"></div>
+      <button id="fb-check" class="primary">${ic('shield')}Провери готовността</button>
+      <div class="hint" style="align-self:center;">Показва кой клиент е готов за приключване на ДДС периода.</div>
+    </div></div>
+    <div id="fb-out"></div>`;
+  document.getElementById('fb-check').onclick=async(e)=>{
+    const b=e.currentTarget; b.disabled=true; b.textContent='Проверява…';
+    const out=document.getElementById('fb-out');
+    try{
+      const r=await api('/firm/bulk/vat-readiness?period_code='+encodeURIComponent(document.getElementById('fb-p').value));
+      out.innerHTML=`<div class="card"><div class="card-t"><h3>Готовност за ${esc(r.period_code)}</h3>
+          <div class="flex"><span class="pill s-green na">${r.ready} готови</span>
+            <span class="pill s-blue na">${r.closed} приключени</span>
+            <span class="pill s-red na">${r.blocked} с пречки</span></div></div>
+        <table><thead><tr><th style="width:32px;"></th><th>Клиент</th><th>Състояние</th><th>Пречки</th></tr></thead><tbody>
+        ${r.clients.map(c=>`<tr><td>${c.ready?`<input type="checkbox" class="fb-pick" value="${c.company_id}" checked>`:''}</td>
+          <td class="strong">${esc(c.name)}</td>
+          <td>${c.closed?'<span class="pill s-blue">приключен</span>':c.ready?'<span class="pill s-green">готов</span>':'<span class="pill s-red">има пречки</span>'}</td>
+          <td>${c.blockers.length?c.blockers.map(x=>`<div class="hint" style="color:var(--bad)">${esc(x)}</div>`).join(''):
+              c.warnings.length?c.warnings.map(x=>`<div class="hint" style="color:var(--warn)">${esc(x)}</div>`).join(''):'<span class="muted-2">—</span>'}</td></tr>`).join('')}
+        </tbody></table>
+        <div class="flex" style="margin-top:12px;"><button id="fb-dl" class="primary">${ic('download')}Свали пакетите за НАП на отметнатите</button></div>
+        <div class="hint" style="margin-top:10px;">${esc(r.note)}</div></div>`;
+      document.getElementById('fb-dl').onclick=async()=>{
+        const ids=[...document.querySelectorAll('.fb-pick:checked')].map(x=>x.value);
+        if(!ids.length){ toast('Отметни поне един клиент',true); return; }
+        const res=await fetch(API+'/firm/bulk/nap-packages',{method:'POST',
+          headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},
+          body:JSON.stringify({company_ids:ids, period_code:r.period_code})});
+        if(!res.ok){ toast('Грешка при генериране',true); return; }
+        const inc=res.headers.get('X-Packages-Included'), skip=res.headers.get('X-Packages-Skipped');
+        const url=URL.createObjectURL(await res.blob()); const a=document.createElement('a');
+        a.href=url; a.download=`NAP-${r.period_code.replace('-','')}.zip`; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url),60000);
+        toast(`Свалени ${inc} пакета${Number(skip)?`, пропуснати ${skip}`:''}`);
+      };
+    }catch(err){ toast(err.message,true); }
+    finally{ b.disabled=false; b.innerHTML=ic('shield')+'Провери готовността'; } };
 }
 
 /* ==================== ЕКИП ==================== */

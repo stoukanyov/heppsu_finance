@@ -13,6 +13,7 @@ from app.modules.banking import models as banking_models  # noqa: F401
 from app.modules.companies import models as companies_models  # noqa: F401
 from app.modules.counterparties import models as counterparties_models  # noqa: F401
 from app.modules.documents import models as documents_models  # noqa: F401
+from app.modules.firm import models as firm_models  # noqa: F401
 from app.modules.identity import models as identity_models  # noqa: F401
 from app.modules.invoicing import models as invoicing_models  # noqa: F401
 from app.modules.payments import models as payments_models  # noqa: F401
