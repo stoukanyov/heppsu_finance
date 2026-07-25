@@ -49,6 +49,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Ако възстановяването на сесията при старт се е провалило, обясняваме защо.
+    final startupError = ref.watch(sessionProvider).startupError;
+    final message = _error ?? startupError;
+
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -112,7 +116,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       validator: (v) =>
                           (v == null || v.isEmpty) ? 'Въведи парола' : null,
                     ),
-                    if (_error != null) ...[
+                    if (message != null) ...[
                       const SizedBox(height: 16),
                       Container(
                         padding: const EdgeInsets.all(12),
@@ -127,7 +131,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                _error!,
+                                message,
                                 style: const TextStyle(color: Color(0xFFDC2626)),
                               ),
                             ),

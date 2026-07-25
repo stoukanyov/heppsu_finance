@@ -272,7 +272,7 @@ const NAV = [
     ['invoices','Фактури','receipt'], ['purchases','Покупки','cart'], ['banking','Банки и каси','bank'], ['payments','Плащания','card'], ['stores','Магазини','apps'],
   ]},
   {sec:'Данъци и отчети', items:[
-    ['vat','ДДС / Декларация','percent'], ['income73','Справка чл.73','receipt'], ['reports','Отчети','chart'], ['analytics','AI Анализи','brain'],
+    ['vat','ДДС / Декларация','percent'], ['refunds','ДДС възстановяване','in'], ['income73','Справка чл.73','receipt'], ['reports','Отчети','chart'], ['analytics','AI Анализи','brain'],
   ]},
   {sec:'Документи и система', items:[
     ['documents','Документи','doc'], ['team','Екип','team'], ['audit','Одит','shield'],
@@ -382,7 +382,7 @@ document.getElementById('new-company').onclick=async()=>{ const name=prompt('И�
 /* ---------- router ---------- */
 let currentView='dashboard';
 const VIEWS={ dashboard:viewDashboard, accounting:viewAccounting, contacts:viewContacts, invoices:viewInvoices,
-  purchases:viewPurchases, banking:viewBanking, payments:viewPayments, stores:viewStores, vat:viewVat, income73:viewIncome73, reports:viewReports,
+  purchases:viewPurchases, banking:viewBanking, payments:viewPayments, stores:viewStores, vat:viewVat, refunds:viewRefunds, income73:viewIncome73, reports:viewReports,
   analytics:viewAnalytics, documents:viewDocuments, team:viewTeam, audit:viewAudit };
 function navigate(view){
   currentView=view; location.hash=view;
@@ -779,6 +779,114 @@ async function loadVatDeclaration(pid){
   }catch(e){ box.innerHTML=`<div class="card">${empty(e.message)}</div>`; }
 }
 
+/* ==================== ДДС ВЪЗСТАНОВЯВАНЕ (чл. 92 ЗДДС) ==================== */
+async function viewRefunds(main){
+  let years=[]; try{ years=await api('/accounting/fiscal-years'); }catch{}
+  const periods=years.flatMap(y=>(y.periods||[]).map(p=>({id:p.id,code:p.code}))).sort((a,b)=>b.code.localeCompare(a.code));
+  const procs=await api('/vat-refunds');
+  main.innerHTML=pageH('Възстановяване на ДДС','Процедури по чл. 92 ЗДДС — приспадане, срокове и решения на НАП')+`
+    <div class="card" style="margin-bottom:16px;"><div class="row">
+      <div class="field" style="margin:0;min-width:170px;"><label>Провери период</label><select id="rf-period">${periods.map(p=>`<option value="${p.id}">${esc(p.code)}</option>`).join('')}</select></div>
+      <button id="rf-eval" class="primary">Провери за възстановяване</button>
+      <div class="hint" style="align-self:center;">Открива процедура, ако данъчният кредит превишава начисления ДДС.</div>
+    </div></div>
+    <div class="card" style="margin-bottom:16px;"><div class="card-t"><h3>Процедури</h3><span class="pill s-gray na">${procs.length}</span></div>
+      ${procs.length?`<table><thead><tr><th>Възникнала</th><th class="num">Първоначална сума</th><th class="num">Приспаднато</th><th class="num">Остатък</th><th>Клетка</th><th>Статус</th><th class="num"></th></tr></thead><tbody>
+        ${procs.map(p=>`<tr><td class="strong">${esc(p.origin_period_id.slice(0,0)||'')}${esc((periods.find(x=>x.id===p.origin_period_id)||{}).code||'—')}</td>
+          <td class="num">${fmt(p.original_refund_amount)}</td><td class="num">${fmt(p.amount_offset)}</td><td class="num strong">${fmt(p.remaining_refund)}</td>
+          <td>${p.declaration_cell?`<span class="pill s-violet na">кл. ${esc(p.declaration_cell)}</span>`:'<span class="muted-2">—</span>'}</td>
+          <td><span class="pill ${p.status==='PAID'?'s-green':p.status==='REFUSED'?'s-red':p.status==='CLOSED'?'s-gray':'s-blue'}">${esc(p.status)}</span></td>
+          <td class="num"><button class="sm rf-open" data-id="${p.id}">Отвори</button></td></tr>`).join('')}</tbody></table>`
+        :empty('Няма открити процедури.')}</div>
+    <div id="rf-detail"></div>`;
+  document.getElementById('rf-eval').onclick=async()=>{
+    const pid=document.getElementById('rf-period').value;
+    try{ const ov=await api(`/vat-refunds/evaluate/${pid}`,{method:'POST'});
+      if(!ov){ toast('За този период няма ДДС за възстановяване'); return; }
+      toast('Процедурата е открита'); viewRefunds(main); setTimeout(()=>showRefund(ov),100);
+    }catch(e){ toast(e.message,true); } };
+  main.querySelectorAll('.rf-open').forEach(b=>b.onclick=async()=>{
+    try{ showRefund(await api(`/vat-refunds/${b.dataset.id}`)); }catch(e){ toast(e.message,true); } });
+  if(procs.length===1){ try{ showRefund(await api(`/vat-refunds/${procs[0].id}`)); }catch{} }
+}
+function showRefund(ov){
+  const box=document.getElementById('rf-detail'); if(!box) return;
+  const p=ov.procedure, a=ov.accelerated;
+  const errs=ov.validations.filter(v=>v.level==='ERROR'), warns=ov.validations.filter(v=>v.level==='WARNING');
+  const steps=[['Данни','CALCULATED'],['Кредит','VAT_CREDIT_VALIDATED'],['Клетка 60','DECLARED_IN_CELL_60'],
+    ['Период 1','OFFSET_PERIOD_1'],['Период 2','OFFSET_PERIOD_2'],['Клетка 80','READY_FOR_CELL_80'],['Подадено','SUBMITTED_FOR_REFUND'],['Платено','PAID']];
+  const order=steps.map(s=>s[1]); const cur=order.indexOf(p.status);
+  const stepsHtml=steps.map(([label,st],i)=>{ const cls=cur<0?'':(i<cur?'done':i===cur?'active':''); return `<div class="step ${cls}"><span class="n">${i+1}</span>${label}</div>`; }).join('<div class="step-sep"></div>');
+  const btn=(id,label,primary)=>`<button class="${primary?'primary':''} rf-act" data-act="${id}" data-id="${p.id}">${label}</button>`;
+  let actions='';
+  if(p.status==='CALCULATED') actions=btn('validate-credit','Потвърди данъчния кредит',true);
+  else if(p.status==='VAT_CREDIT_VALIDATED') actions=btn('declare-cell-60','Декларирай в клетка 60',true);
+  else if(p.status==='DECLARED_IN_CELL_60'&&p.first_offset_period_id) actions=btn('offset1',`Приспадни ${ov.first_offset_period_code||''}`,true);
+  else if(p.status==='OFFSET_PERIOD_1'&&p.second_offset_period_id) actions=btn('offset2',`Приспадни ${ov.second_offset_period_code||''}`,true);
+  else if(['READY_FOR_CELL_80','DECLARED_IN_CELL_81','DECLARED_IN_CELL_82'].includes(p.status)) actions=btn('submit','Отбележи подаването',true);
+  else if(p.status==='SUBMITTED_FOR_REFUND') actions=btn('nra-check','Стартирана проверка от НАП',false);
+  else if(['APPROVED','PARTIALLY_APPROVED','OFFSET_BY_NRA'].includes(p.status)) actions=btn('paid','Отбележи получената сума',true);
+
+  box.innerHTML=`
+    <div class="card" style="margin-top:16px;"><div class="card-t"><h3>Процедура · период ${esc(ov.origin_period_code)}</h3>
+      <div class="flex"><span class="pill s-violet na">${esc(p.legal_basis)}</span>${p.declaration_cell?`<span class="pill s-blue">клетка ${esc(p.declaration_cell)}</span>`:''}</div></div>
+      <div class="steps">${stepsHtml}</div>
+      <div class="kpis" style="margin-bottom:14px;">
+        <div class="card kpi"><div class="top"><div><div class="l">ДДС за възстановяване</div><div class="v">${fmt(p.original_refund_amount)}</div></div><div class="chip c-green">${ic('in')}</div></div></div>
+        <div class="card kpi"><div class="top"><div><div class="l">Приспаднато (кл. 70)</div><div class="v">${fmt(p.amount_offset)}</div></div><div class="chip c-amber">${ic('out')}</div></div></div>
+        <div class="card kpi"><div class="top"><div><div class="l">Текущ остатък</div><div class="v">${fmt(p.remaining_refund)}</div></div><div class="chip c-violet">${ic('wallet')}</div></div></div>
+      </div>
+      <table><tbody>
+        <tr><td class="muted">Приложима процедура</td><td class="strong">${esc(p.procedure_type)} · ${esc(p.legal_basis)}</td></tr>
+        <tr><td class="muted">Период 1 / Период 2</td><td>${esc(ov.first_offset_period_code||'—')} / ${esc(ov.second_offset_period_code||'—')}</td></tr>
+        <tr><td class="muted">Очаквано приключване</td><td>декларацията за ${esc(ov.expected_completion_period_code||'—')}</td></tr>
+        <tr><td class="muted">Срок за подаване</td><td>${esc(p.submission_deadline||'—')}</td></tr>
+        ${p.expected_refund_deadline?`<tr><td class="muted">Срок за възстановяване (30 дни)</td><td class="strong">${esc(p.expected_refund_deadline)}</td></tr>`:''}
+        <tr><td class="muted">Следваща стъпка</td><td class="strong">${esc(ov.next_action)}</td></tr>
+      </tbody></table>
+      ${actions?`<div class="flex" style="margin-top:14px;">${actions}</div>`:''}
+    </div>
+    ${p.offsets?.length?`<div class="card" style="margin-top:16px;"><div class="card-t"><h3>Приспадания (клетки 70 / 71)</h3></div>
+      <table><thead><tr><th>№</th><th class="num">ДДС за внасяне (кл. 50)</th><th class="num">Приспаднато (кл. 70)</th><th class="num">За внасяне (кл. 71)</th><th class="num">Остатък след</th></tr></thead><tbody>
+      ${p.offsets.map(o=>`<tr><td class="strong">${o.sequence}</td><td class="num">${fmt(o.vat_payable_in_period)}</td><td class="num">${fmt(o.amount)}</td><td class="num">${fmt(o.payable_remaining)}</td><td class="num">${fmt(o.refund_remaining_after)}</td></tr>`).join('')}</tbody></table></div>`:''}
+    ${a?`<div class="card" style="margin-top:16px;"><div class="card-t"><h3>Проверка за ускорено възстановяване</h3>
+        ${a.eligible?'<span class="pill s-green">Условието е изпълнено</span>':'<span class="pill s-gray">Не отговаря</span>'}</div>
+      <table><tbody>
+        <tr><td class="muted">Доставки с нулева ставка</td><td class="strong">${fmt(a.ratio_percent)}%</td></tr>
+        <tr><td class="muted">Минимално изискване</td><td>над ${fmt(a.threshold_percent)}%</td></tr>
+        <tr><td class="muted">Период на изчисление</td><td>${esc(a.period_from)} – ${esc(a.period_to)} (${fmt(a.zero_rate_amount)} от ${fmt(a.taxable_amount)})</td></tr>
+        <tr><td class="muted">Основание</td><td>${esc(a.legal_basis)}</td></tr>
+        <tr><td class="muted">Предложена клетка</td><td class="strong">81 · срок 30 дни от подаване</td></tr>
+      </tbody></table>
+      <ul class="check" style="margin-top:8px;">${a.reasons.map(r=>`<li>${ic('check')}<span>${esc(r)}</span></li>`).join('')}</ul>
+      ${a.eligible&&['CALCULATED','VAT_CREDIT_VALIDATED','ACCELERATED_ELIGIBILITY_CONFIRMED'].includes(p.status)
+        ?`<div class="hint" style="margin:10px 0;">Ускорената процедура не се прилага автоматично — необходимо е потвърждение от счетоводител.</div>
+          <button class="primary rf-act" data-act="accelerated" data-id="${p.id}">${ic('check')}Декларирай в клетка 81</button>`:''}</div>`:''}
+    ${(errs.length||warns.length)?`<div class="card" style="margin-top:16px;"><div class="card-t"><h3>Задължителни проверки</h3>${errs.length?'<span class="pill s-red">Има грешки</span>':'<span class="pill s-amber">Предупреждения</span>'}</div>
+      <ul class="check">${errs.map(v=>`<li style="color:var(--bad)">${ic('alert')}<span style="color:var(--ink-2)">${esc(v.message)}</span></li>`).join('')}
+      ${warns.map(v=>`<li style="color:var(--warn)">${ic('alert')}<span style="color:var(--ink-2)">${esc(v.message)}</span></li>`).join('')}</ul></div>`
+      :`<div class="card" style="margin-top:16px;"><span class="badge-ok">✓ Всички задължителни проверки са преминати</span></div>`}`;
+
+  box.querySelectorAll('.rf-act').forEach(b=>b.onclick=async()=>{
+    const id=b.dataset.id, act=b.dataset.act; b.disabled=true;
+    try{
+      let ov2;
+      if(act==='offset1') ov2=await api(`/vat-refunds/${id}/offset/${p.first_offset_period_id}`,{method:'POST'});
+      else if(act==='offset2') ov2=await api(`/vat-refunds/${id}/offset/${p.second_offset_period_id}`,{method:'POST'});
+      else if(act==='accelerated'){
+        if(!confirm('Отговаряте на условията за ускорено възстановяване по чл. 92, ал. 3. Желаете ли сумата да бъде декларирана в клетка 81?')){ b.disabled=false; return; }
+        ov2=await api(`/vat-refunds/${id}/elect-accelerated`,{method:'POST',body:{confirm:true}});
+      }
+      else if(act==='paid'){
+        const amt=prompt('Получена сума:', p.remaining_refund); if(!amt){ b.disabled=false; return; }
+        ov2=await api(`/vat-refunds/${id}/payment`,{method:'POST',body:{amount_paid:amt}});
+      }
+      else ov2=await api(`/vat-refunds/${id}/${act}`,{method:'POST'});
+      toast('Процедурата е обновена'); showRefund(ov2);
+    }catch(e){ toast(e.message,true); b.disabled=false; } });
+  box.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
 /* ==================== СПРАВКА ЧЛ.73, АЛ.6 ЗДДФЛ ==================== */
 let inc73 = [];
 async function viewIncome73(main){
@@ -899,50 +1007,131 @@ async function viewAnalytics(main){
 }
 
 /* ==================== ДОКУМЕНТИ ==================== */
+let docCpMap = {};
 async function viewDocuments(main){
-  main.innerHTML=pageH('Документи','Качване, мобилно сканиране и AI разпознаване')+`
-    <div class="cols" style="margin-bottom:16px;">
-      <div class="card"><h3 style="margin-bottom:12px;">Качи документ</h3>
-        <div class="row"><div class="field grow"><label>PDF или изображение</label><input id="doc-file" type="file" accept="application/pdf,image/*"/></div>
-        <button id="doc-up" class="primary">Качи</button></div>
-        <div class="hint">Файлът се пази и се обработва с „AI извличане".</div></div>
-      <div class="card"><h3 style="margin-bottom:12px;">${ic('scan')} Сканиране (мобилен поток)</h3>
-        <div class="row"><div class="field grow"><label>Снимка/скан на фактура</label><input id="scan-file" type="file" accept="image/*,application/pdf"/></div>
-        <button id="scan-btn" class="primary">Сканирай + OCR</button></div>
-        <div class="hint">Едно действие: качва изображението и веднага го разпознава (source=MOBILE).</div></div>
+  try{ docCpMap = Object.fromEntries((await api('/counterparties')).map(c=>[c.id, c.name])); }catch{ docCpMap = {}; }
+  main.innerHTML=pageH('Документи и фактури','Качи или сканирай фактура — AI разпознава, класифицира и предлага статия')+`
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-t"><h3>${ic('scan')} Приеми фактура или касова бележка</h3><span class="pill s-violet na">OCR + AI класификация</span></div>
+      <div class="drop" id="drop-zone" style="cursor:pointer;">
+        <div style="font-weight:600;margin-bottom:4px;">Пусни файла тук или щракни, за да избереш</div>
+        <div class="hint">PDF, JPG, PNG, HEIC · разпознава се автоматично и се файлира при контрагента</div>
+        <input id="intake-file" type="file" accept="application/pdf,image/*" style="display:none"/>
+      </div>
+      <div class="row" style="margin-top:12px;align-items:center;">
+        <div class="field grow" style="margin:0;"><label>Бележка (по избор)</label><input id="intake-note" placeholder="напр. Наем на офис за юли"/></div>
+        <div class="field" style="margin:0;"><label>Обработка</label><select id="intake-mode">
+          <option value="scan">Разпознай + предложи статия</option>
+          <option value="upload">Само качи (без OCR)</option></select></div>
+        <button id="intake-btn" class="primary">Приеми документа</button>
+      </div>
+      <div id="intake-name" class="hint" style="margin-top:8px;"></div>
     </div>
-    <div class="card"><div class="card-t"><h3>Списък</h3></div><div id="doc-list">${loading()}</div></div>
+    <div class="card"><div class="card-t"><h3>Документи</h3><span class="pill s-gray na" id="doc-count">…</span></div><div id="doc-list">${loading()}</div></div>
     <div id="doc-detail"></div>`;
-  document.getElementById('doc-up').onclick=async()=>{
-    const f=document.getElementById('doc-file').files[0]; if(!f){ toast('Избери файл',true); return; }
-    const fd=new FormData(); fd.append('file',f);
-    try{ await api('/documents',{method:'POST',form:fd}); toast('Документът е качен'); loadDocs(); }catch(e){ toast(e.message,true); } };
-  document.getElementById('scan-btn').onclick=async()=>{
-    const f=document.getElementById('scan-file').files[0]; if(!f){ toast('Избери снимка/скан',true); return; }
-    const fd=new FormData(); fd.append('file',f); const btn=document.getElementById('scan-btn'); btn.disabled=true; btn.textContent='OCR…';
-    try{ const r=await api('/documents/scan',{method:'POST',form:fd}); toast('Сканирано и разпознато'); showExtraction(r.extraction); loadDocs(); }
-    catch(e){ toast(e.message,true); } finally{ btn.disabled=false; btn.textContent='Сканирай + OCR'; } };
+
+  const fileInput=document.getElementById('intake-file'), zone=document.getElementById('drop-zone'), nameBox=document.getElementById('intake-name');
+  const showName=()=>{ const f=fileInput.files[0]; nameBox.textContent=f?`Избран: ${f.name} (${Math.round(f.size/1024)} KB)`:''; };
+  zone.onclick=()=>fileInput.click();
+  fileInput.onchange=showName;
+  ['dragover','dragenter'].forEach(ev=>zone.addEventListener(ev,e=>{ e.preventDefault(); zone.style.borderColor='var(--accent)'; zone.style.background='var(--accent-soft)'; }));
+  ['dragleave','drop'].forEach(ev=>zone.addEventListener(ev,e=>{ e.preventDefault(); zone.style.borderColor='var(--line-2)'; zone.style.background='#fafbfc'; }));
+  zone.addEventListener('drop',e=>{ if(e.dataTransfer.files.length){ fileInput.files=e.dataTransfer.files; showName(); } });
+
+  document.getElementById('intake-btn').onclick=async()=>{
+    const f=fileInput.files[0]; if(!f){ toast('Избери файл',true); return; }
+    const mode=document.getElementById('intake-mode').value, note=document.getElementById('intake-note').value;
+    const btn=document.getElementById('intake-btn'); btn.disabled=true; btn.textContent=mode==='scan'?'Разпознава…':'Качва…';
+    const fd=new FormData(); fd.append('file',f); if(note && mode==='scan') fd.append('note',note);
+    try{
+      if(mode==='scan'){
+        const r=await api('/documents/scan',{method:'POST',form:fd});
+        toast('Разпознато и класифицирано'); showIntakeResult(r);
+      } else {
+        await api('/documents',{method:'POST',form:fd}); toast('Документът е качен');
+      }
+      fileInput.value=''; nameBox.textContent=''; document.getElementById('intake-note').value='';
+      docCpMap = Object.fromEntries((await api('/counterparties')).map(c=>[c.id, c.name]));
+      loadDocs();
+    }catch(e){ toast(e.message,true); }
+    finally{ btn.disabled=false; btn.textContent='Приеми документа'; } };
   loadDocs();
 }
 async function loadDocs(){
   const box=document.getElementById('doc-list'); if(!box) return;
   const docs=await api('/documents');
-  if(!docs.length){ box.innerHTML=empty('Няма документи.'); return; }
-  box.innerHTML=`<table><thead><tr><th>Файл</th><th>Източник</th><th>Статус</th><th class="num">Действия</th></tr></thead><tbody>
-    ${docs.map(d=>`<tr><td class="strong">${esc(d.original_filename)}</td><td>${pill(d.source)}</td><td>${pill(d.status)}</td>
-      <td class="num"><div class="flex" style="justify-content:flex-end;gap:6px;"><button class="icon-btn dl" data-id="${d.id}" title="Изтегли">${ic('download')}</button><button class="sm extract" data-id="${d.id}">AI извличане</button></div></td></tr>`).join('')}</tbody></table>`;
-  box.querySelectorAll('.extract').forEach(b=>b.onclick=async()=>{ b.disabled=true; b.textContent='Обработва…';
-    try{ const r=await api(`/ai/documents/${b.dataset.id}/extract`,{method:'POST'}); showExtraction(r); loadDocs(); }
-    catch(e){ toast(e.message,true); b.disabled=false; b.textContent='AI извличане'; } });
+  const cnt=document.getElementById('doc-count'); if(cnt) cnt.textContent=docs.length;
+  if(!docs.length){ box.innerHTML=empty('Няма документи. Приеми първата фактура по-горе.'); return; }
+  box.innerHTML=`<table><thead><tr><th>Файл</th><th>Контрагент</th><th>Източник</th><th>Статус</th><th class="num">Действия</th></tr></thead><tbody>
+    ${docs.map(d=>`<tr><td class="strong">${esc(d.original_filename)}</td>
+      <td>${d.counterparty_id?esc(docCpMap[d.counterparty_id]||'—'):'<span class="muted-2">—</span>'}</td>
+      <td>${pill(d.source)}</td><td>${pill(d.status)}</td>
+      <td class="num"><div class="flex" style="justify-content:flex-end;gap:6px;">
+        <button class="icon-btn dl" data-id="${d.id}" title="Изтегли оригинала">${ic('download')}</button>
+        <button class="sm review" data-id="${d.id}">Прегледай</button>
+        ${d.status==='PROPOSED'?`<button class="sm primary confirm" data-id="${d.id}">Осчетоводи</button>`:''}
+      </div></td></tr>`).join('')}</tbody></table>`;
   box.querySelectorAll('.dl').forEach(b=>b.onclick=()=>blobDownload(`/documents/${b.dataset.id}/file`,`документ-${b.dataset.id}`));
+  box.querySelectorAll('.review').forEach(b=>b.onclick=()=>reviewDoc(b.dataset.id));
+  box.querySelectorAll('.confirm').forEach(b=>b.onclick=async()=>{
+    b.disabled=true; b.textContent='…';
+    try{ const r=await api(`/documents/${b.dataset.id}/confirm-posting`,{method:'POST'});
+      toast(`Осчетоводено · операция №${r.entry.entry_number}`); loadDocs(); document.getElementById('doc-detail').innerHTML='';
+    }catch(e){ toast(e.message,true); b.disabled=false; b.textContent='Осчетоводи'; } });
 }
-function showExtraction(r){
-  const f=r.data.fields||{}; const rows=Object.entries(f).map(([k,v])=>`<tr><td class="muted">${esc(k)}</td><td class="strong">${esc(v)}</td></tr>`).join('');
-  const conf=Math.round((r.data.overall_confidence||0)*100);
-  document.getElementById('doc-detail').innerHTML=`<div class="card" style="margin-top:16px;"><div class="card-t"><h3>Разпознати данни</h3><span class="pill ${conf>=75?'s-green':'s-amber'}">увереност ${conf}%</span></div>
-    <table><tbody>${rows||`<tr><td class="muted">Няма разпознати полета</td></tr>`}</tbody></table>
-    ${r.data.notes?`<div class="hint" style="margin-top:10px;">${esc(r.data.notes)}</div>`:''}</div>`;
-  document.getElementById('doc-detail').scrollIntoView({behavior:'smooth',block:'nearest'});
+async function reviewDoc(docId){
+  const box=document.getElementById('doc-detail'); box.innerHTML=`<div class="card" style="margin-top:16px;">${loading()}</div>`;
+  try{
+    const r=await api(`/documents/${docId}/propose-posting`,{method:'POST'});
+    showIntakeResult({document:{id:docId}, extraction:null, posting:r});
+  }catch(e){ box.innerHTML=`<div class="card" style="margin-top:16px;">${empty(e.message)}</div>`; }
+}
+function showIntakeResult(res){
+  const box=document.getElementById('doc-detail'); const p=res.posting, ex=res.extraction;
+  let html='';
+  if(ex){
+    const f=ex.data.fields||{}; const conf=Math.round((ex.data.overall_confidence||0)*100);
+    const labels={issuer:'Издател',issuer_eik:'ЕИК',issuer_vat_number:'ДДС №',document_number:'Документ №',document_date:'Дата',
+      currency:'Валута',tax_base:'Данъчна основа',vat_rate:'ДДС ставка',vat_amount:'ДДС',total:'Общо',iban:'IBAN'};
+    const rows=Object.entries(f).filter(([,v])=>v!==null&&v!=='').map(([k,v])=>`<tr><td class="muted">${esc(labels[k]||k)}</td><td class="strong">${esc(v)}</td></tr>`).join('');
+    html+=`<div class="card" style="margin-top:16px;"><div class="card-t"><h3>Разпознати данни</h3><span class="pill ${conf>=75?'s-green':'s-amber'}">увереност ${conf}%</span></div>
+      <table><tbody>${rows||`<tr><td class="muted">Няма разпознати полета</td></tr>`}</tbody></table></div>`;
+  }
+  if(p && p.classification){
+    const c=p.classification;
+    const dedOk=c.is_deductible;
+    html+=`<div class="card" style="margin-top:16px;"><div class="card-t"><h3>AI данъчна преценка</h3>
+        <div class="flex">${dedOk?'<span class="pill s-green">Признат разход</span>':'<span class="pill s-red">Непризнат разход</span>'}
+        <span class="pill ${c.vat_credit==='FULL'?'s-green':c.vat_credit==='NONE'?'s-red':'s-amber'}">ДДС кредит: ${esc(c.vat_credit)}</span></div></div>
+      <table><tbody>
+        <tr><td class="muted">Сметка</td><td class="strong">${esc(c.account_code)}${c.expense_category?' · '+esc(c.expense_category):''}</td></tr>
+        <tr><td class="muted">По ЗКПО</td><td>${esc(c.tax_rationale)}</td></tr>
+        ${c.vat_rationale?`<tr><td class="muted">По ЗДДС</td><td>${esc(c.vat_rationale)}</td></tr>`:''}
+      </tbody></table></div>`;
+  }
+  if(p && p.entry){
+    const e=p.entry, posted=e.status==='POSTED';
+    html+=`<div class="card" style="margin-top:16px;"><div class="card-t"><h3>Предложена статия</h3>
+        <div class="flex">${pill(e.status)}${p.auto_posted?'<span class="pill s-violet">авто-осчетоводена</span>':''}</div></div>
+      <table><thead><tr><th>Сметка</th><th>Описание</th><th class="num">Дебит</th><th class="num">Кредит</th></tr></thead><tbody>
+      ${e.lines.map(l=>`<tr><td class="strong">${esc(l.account_code||'')}</td><td>${esc(l.description||'')}</td>
+        <td class="num">${Number(l.debit)?fmt(l.debit):''}</td><td class="num">${Number(l.credit)?fmt(l.credit):''}</td></tr>`).join('')}
+      <tr style="font-weight:700"><td colspan="2">ОБЩО</td><td class="num">${fmt(e.total_debit)}</td><td class="num">${fmt(e.total_credit)}</td></tr></tbody></table>
+      <div class="hint" style="margin-top:10px;">${esc(p.rationale||'')}</div>
+      ${p.warnings?.length?`<ul class="check" style="margin-top:8px;">${p.warnings.map(w=>`<li style="color:var(--warn)">${ic('alert')}<span style="color:var(--ink-2)">${esc(w)}</span></li>`).join('')}</ul>`:''}
+      ${!posted?`<button class="primary confirm-detail" data-id="${res.document.id}" style="margin-top:12px;">${ic('check')}Потвърди и осчетоводи</button>`:''}</div>`;
+  } else if(p){
+    html+=`<div class="card" style="margin-top:16px;"><div class="card-t"><h3>Статия не може да се предложи</h3></div>
+      <ul class="check">${(p.warnings||[]).map(w=>`<li style="color:var(--warn)">${ic('alert')}<span style="color:var(--ink-2)">${esc(w)}</span></li>`).join('')||'<li class="muted">Няма подробности.</li>'}</ul>
+      <div class="hint" style="margin-top:8px;">${esc(p.rationale||'')}</div></div>`;
+  }
+  box.innerHTML=html||`<div class="card" style="margin-top:16px;">${empty('Няма данни за показване.')}</div>`;
+  box.querySelectorAll('.confirm-detail').forEach(b=>b.onclick=async()=>{
+    b.disabled=true; b.textContent='Осчетоводява…';
+    try{ const r=await api(`/documents/${b.dataset.id}/confirm-posting`,{method:'POST'});
+      toast(`Осчетоводено · операция №${r.entry.entry_number}`); box.innerHTML=''; loadDocs();
+    }catch(e){ toast(e.message,true); b.disabled=false; b.textContent='Потвърди и осчетоводи'; } });
+  box.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 
 /* ==================== ЕКИП ==================== */

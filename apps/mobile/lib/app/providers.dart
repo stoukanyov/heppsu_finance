@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/network/api_client.dart';
+import '../core/network/api_exception.dart';
 import '../core/security/secure_store.dart';
 import '../data/repositories.dart';
 import '../domain/models.dart';
@@ -112,12 +113,17 @@ class SessionState {
     this.user,
     this.companies = const [],
     this.activeCompanyId,
+    this.startupError,
   });
 
   final SessionStage stage;
   final AppUser? user;
   final List<Company> companies;
   final String? activeCompanyId;
+
+  /// Съобщение, ако възстановяването на сесията при старт се е провалило —
+  /// показва се на екрана за вход, за да не изглежда като „грешна парола".
+  final String? startupError;
 
   Company? get activeCompany {
     for (final c in companies) {
@@ -153,13 +159,29 @@ class SessionController extends StateNotifier<SessionState> {
   AuthRepository get _auth => _ref.read(authRepositoryProvider);
 
   /// При старт: ако има валиден токен → зареди профил и компании.
+  ///
+  /// Никога не оставя приложението на splash: при всяка грешка връща към Login
+  /// с обяснение, вместо да увисне в `loading`.
   Future<void> bootstrap() async {
-    final token = await _ref.read(secureStoreProvider).readToken();
-    if (token == null) {
-      state = const SessionState(stage: SessionStage.unauthenticated);
-      return;
+    try {
+      final token = await _ref.read(secureStoreProvider).readToken();
+      if (token == null) {
+        state = const SessionState(stage: SessionStage.unauthenticated);
+        return;
+      }
+      await _loadAfterAuth();
+    } on ApiException catch (e) {
+      // 401 вече е обработен от интерцептора; тук остават 5xx/403 и подобни.
+      state = SessionState(
+        stage: SessionStage.unauthenticated,
+        startupError: e.isUnauthorized ? null : e.message,
+      );
+    } catch (_) {
+      state = const SessionState(
+        stage: SessionStage.unauthenticated,
+        startupError: 'Няма връзка със сървъра. Влез отново, когато си онлайн.',
+      );
     }
-    await _loadAfterAuth();
   }
 
   Future<void> login(String email, String password) async {

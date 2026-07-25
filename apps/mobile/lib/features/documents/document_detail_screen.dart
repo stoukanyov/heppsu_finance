@@ -8,24 +8,38 @@ import '../../domain/models.dart';
 import '../common/widgets.dart';
 import 'posting_card.dart';
 
-final _documentProvider =
-    FutureProvider.autoDispose.family<Document, String>((ref, id) {
+final _documentProvider = FutureProvider.autoDispose.family<Document, String>((
+  ref,
+  id,
+) {
   return ref.watch(documentsRepositoryProvider).get(id);
 });
 
-final _documentFileProvider =
-    FutureProvider.autoDispose.family<Uint8List, String>((ref, id) {
-  return ref.watch(documentsRepositoryProvider).fileBytes(id);
-});
+final _documentFileProvider = FutureProvider.autoDispose
+    .family<Uint8List, String>((ref, id) {
+      return ref.watch(documentsRepositoryProvider).fileBytes(id);
+    });
 
 /// Детайл на документ: оригиналното изображение + статус + осчетоводяване.
-class DocumentDetailScreen extends ConsumerWidget {
+class DocumentDetailScreen extends ConsumerStatefulWidget {
   const DocumentDetailScreen({super.key, required this.documentId});
 
   final String documentId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DocumentDetailScreen> createState() =>
+      _DocumentDetailScreenState();
+}
+
+class _DocumentDetailScreenState extends ConsumerState<DocumentDetailScreen> {
+  /// Документът, върнат от потвърждаването — има предимство пред кеша,
+  /// за да се види новият статус веднага.
+  Document? _fresh;
+
+  String get documentId => widget.documentId;
+
+  @override
+  Widget build(BuildContext context) {
     final doc = ref.watch(_documentProvider(documentId));
 
     return Scaffold(
@@ -36,49 +50,57 @@ class DocumentDetailScreen extends ConsumerWidget {
           message: 'Документът не можа да се зареди.\n$e',
           onRetry: () => ref.invalidate(_documentProvider(documentId)),
         ),
-        data: (d) => ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-          children: [
-            _OriginalImage(documentId: documentId),
-            const SizedBox(height: 16),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            d.originalFilename,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
+        data: (loaded) {
+          final d = _fresh ?? loaded;
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            children: [
+              _OriginalImage(documentId: documentId),
+              const SizedBox(height: 16),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              d.originalFilename,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
-                        ),
-                        StatusPill(d.status.label),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${(d.sizeBytes / 1024).round()} KB · ${d.contentType} · '
-                      'източник ${d.source == 'MOBILE' ? 'мобилно' : d.source.toLowerCase()}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.black.withValues(alpha: 0.45),
+                          StatusPill(d.status.label),
+                        ],
                       ),
-                    ),
-                    if (d.notes != null && d.notes!.isNotEmpty) ...[
-                      const SizedBox(height: 10),
-                      Text(d.notes!, style: const TextStyle(fontSize: 13)),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${(d.sizeBytes / 1024).round()} KB · ${d.contentType} · '
+                        'източник ${d.source == 'MOBILE' ? 'мобилно' : d.source.toLowerCase()}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.black.withValues(alpha: 0.45),
+                        ),
+                      ),
+                      if (d.notes != null && d.notes!.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Text(d.notes!, style: const TextStyle(fontSize: 13)),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 20),
-            PostingCard(documentId: documentId),
-          ],
-        ),
+              const SizedBox(height: 20),
+              PostingCard(
+                documentId: documentId,
+                onPosted: (updated) => setState(() => _fresh = updated),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -110,11 +132,16 @@ class _OriginalImage extends ConsumerWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.image_not_supported_outlined,
-                    size: 36, color: Colors.black.withValues(alpha: 0.25)),
+                Icon(
+                  Icons.image_not_supported_outlined,
+                  size: 36,
+                  color: Colors.black.withValues(alpha: 0.25),
+                ),
                 const SizedBox(height: 8),
-                const Text('Прегледът не е наличен',
-                    style: TextStyle(fontSize: 12.5)),
+                const Text(
+                  'Прегледът не е наличен',
+                  style: TextStyle(fontSize: 12.5),
+                ),
               ],
             ),
           ),

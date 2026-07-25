@@ -3,7 +3,7 @@ import datetime as dt
 import uuid
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.modules.accounting.models import (
     AccountType,
@@ -88,6 +88,29 @@ class JournalLineOut(BaseModel):
     debit_base: Decimal
     credit_base: Decimal
     description: str | None
+    # Изведени от сметката, за да не се налага клиентът да прави отделна заявка.
+    account_code: str | None = None
+    account_name: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _expand_account(cls, data):
+        """Разгъва свързаната сметка в код и наименование при валидиране от ORM обект."""
+        account = getattr(data, "account", None)
+        if account is None:
+            return data
+        return {
+            "id": data.id,
+            "line_no": data.line_no,
+            "account_id": data.account_id,
+            "debit": data.debit,
+            "credit": data.credit,
+            "debit_base": data.debit_base,
+            "credit_base": data.credit_base,
+            "description": data.description,
+            "account_code": account.code,
+            "account_name": account.name,
+        }
 
 
 class JournalEntryCreate(BaseModel):

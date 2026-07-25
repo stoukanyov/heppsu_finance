@@ -16,12 +16,17 @@ class PostingCard extends ConsumerStatefulWidget {
     super.key,
     required this.documentId,
     this.initialProposal,
+    this.onPosted,
   });
 
   final String documentId;
 
   /// Предложението, ако вече е дошло със scan-а; иначе се заявява при показване.
   final PostingProposal? initialProposal;
+
+  /// Извиква се с обновения документ след успешно осчетоводяване, за да може
+  /// екранът наоколо да опресни статуса си.
+  final void Function(Document document)? onPosted;
 
   @override
   ConsumerState<PostingCard> createState() => _PostingCardState();

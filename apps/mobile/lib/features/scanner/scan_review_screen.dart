@@ -215,16 +215,26 @@ class _FailedCard extends StatelessWidget {
 }
 
 /// Разпознати данни + предложена статия.
-class _ResultSection extends StatelessWidget {
+class _ResultSection extends StatefulWidget {
   const _ResultSection({required this.result});
 
   final ScanResult result;
 
   @override
+  State<_ResultSection> createState() => _ResultSectionState();
+}
+
+class _ResultSectionState extends State<_ResultSection> {
+  /// Обновеният документ след осчетоводяване (сменя статуса без ново зареждане).
+  Document? _fresh;
+
+  @override
   Widget build(BuildContext context) {
+    final result = widget.result;
     final extraction = result.extraction;
     final fields = extraction.displayFields;
     final confidence = extraction.confidence;
+    final document = _fresh ?? result.document;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -232,7 +242,7 @@ class _ResultSection extends StatelessWidget {
         Row(
           children: [
             const Expanded(child: SectionTitle('Разпознати данни')),
-            StatusPill(result.document.status.label),
+            StatusPill(document.status.label),
           ],
         ),
         Card(
@@ -284,6 +294,7 @@ class _ResultSection extends StatelessWidget {
         PostingCard(
           documentId: result.document.id,
           initialProposal: result.posting,
+          onPosted: (updated) => setState(() => _fresh = updated),
         ),
       ],
     );
