@@ -41,6 +41,18 @@ class DocumentStatusUpdate(BaseModel):
     status: DocumentStatus
 
 
+class ExtractionFieldsUpdate(BaseModel):
+    """Ръчна корекция на разпознатите данни (когато AI е разчел зле).
+
+    `fields` съдържа САМО полетата за промяна — сливат се върху съществуващите
+    (merge, не replace). Коригираните полета се маркират като човешки потвърдени
+    и вече не свалят общата увереност.
+    """
+
+    fields: dict = Field(default_factory=dict)
+    recalculate: bool = True   # да се преизчисли ли предложението за статия
+
+
 class ScanResultOut(BaseModel):
     """Резултат от мобилно сканиране: документът, разпознатите данни и предложената статия."""
 

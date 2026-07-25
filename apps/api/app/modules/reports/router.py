@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter
 
-from app.api.deps import CurrentCompany, DbSession
+from app.api.deps import CurrentCompany, DbSession, require
 from app.modules.reports import service
 from app.modules.reports.schemas import (
     BalanceSheetOut,
@@ -18,7 +18,7 @@ from app.modules.reports.schemas import (
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
-@router.get("/trial-balance", response_model=TrialBalanceOut)
+@router.get("/trial-balance", response_model=TrialBalanceOut, dependencies=[require("reports.view")])
 def trial_balance(
     ctx: CurrentCompany,
     db: DbSession,
@@ -29,7 +29,7 @@ def trial_balance(
     return service.trial_balance(db, ctx.company.id, date_from, date_to)
 
 
-@router.get("/profit-and-loss", response_model=ProfitAndLossOut)
+@router.get("/profit-and-loss", response_model=ProfitAndLossOut, dependencies=[require("reports.view")])
 def profit_and_loss(
     ctx: CurrentCompany,
     db: DbSession,
@@ -40,7 +40,7 @@ def profit_and_loss(
     return service.profit_and_loss(db, ctx.company.id, date_from, date_to)
 
 
-@router.get("/kpis", response_model=KpiSummaryOut)
+@router.get("/kpis", response_model=KpiSummaryOut, dependencies=[require("reports.view")])
 def kpis(
     ctx: CurrentCompany,
     db: DbSession,
@@ -51,7 +51,7 @@ def kpis(
     return service.kpi_summary(db, ctx.company.id, date_from, date_to)
 
 
-@router.get("/balance-sheet", response_model=BalanceSheetOut)
+@router.get("/balance-sheet", response_model=BalanceSheetOut, dependencies=[require("reports.view")])
 def balance_sheet(
     ctx: CurrentCompany,
     db: DbSession,
@@ -61,7 +61,7 @@ def balance_sheet(
     return service.balance_sheet(db, ctx.company.id, as_of)
 
 
-@router.get("/cash-flow", response_model=CashFlowOut)
+@router.get("/cash-flow", response_model=CashFlowOut, dependencies=[require("reports.view")])
 def cash_flow(
     ctx: CurrentCompany,
     db: DbSession,
@@ -72,7 +72,7 @@ def cash_flow(
     return service.cash_flow(db, ctx.company.id, date_from, date_to)
 
 
-@router.get("/general-ledger/{account_id}", response_model=GeneralLedgerOut)
+@router.get("/general-ledger/{account_id}", response_model=GeneralLedgerOut, dependencies=[require("reports.view")])
 def general_ledger(
     account_id: uuid.UUID,
     ctx: CurrentCompany,

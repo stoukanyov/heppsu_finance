@@ -275,7 +275,7 @@ const NAV = [
     ['vat','ДДС / Декларация','percent'], ['refunds','ДДС възстановяване','in'], ['income73','Справка чл.73','receipt'], ['reports','Отчети','chart'], ['analytics','AI Анализи','brain'],
   ]},
   {sec:'Документи и система', items:[
-    ['documents','Документи','doc'], ['team','Екип','team'], ['audit','Одит','shield'],
+    ['documents','Документи','doc'], ['team','Екип','team'], ['admin','Роли и права','shield'], ['audit','Одит','shield'],
   ]},
 ];
 function buildNav(){
@@ -383,7 +383,7 @@ document.getElementById('new-company').onclick=async()=>{ const name=prompt('И�
 let currentView='dashboard';
 const VIEWS={ dashboard:viewDashboard, accounting:viewAccounting, contacts:viewContacts, invoices:viewInvoices,
   purchases:viewPurchases, banking:viewBanking, payments:viewPayments, stores:viewStores, vat:viewVat, refunds:viewRefunds, income73:viewIncome73, reports:viewReports,
-  analytics:viewAnalytics, documents:viewDocuments, team:viewTeam, audit:viewAudit };
+  analytics:viewAnalytics, documents:viewDocuments, team:viewTeam, admin:viewAdmin, audit:viewAudit };
 function navigate(view){
   currentView=view; location.hash=view;
   document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===view));
@@ -1228,6 +1228,108 @@ async function viewTeam(main){
   main.querySelectorAll('tbody tr').forEach(tr=>{ const id=tr.dataset.id;
     tr.querySelector('.role-sel').onchange=async(e)=>{ try{ await api(`/members/${id}`,{method:'PATCH',body:{role:e.target.value}}); toast('Ролята е сменена'); }catch(err){ toast(err.message,true); viewTeam(main); } };
     tr.querySelector('.rm').onclick=async()=>{ try{ await api(`/members/${id}`,{method:'DELETE'}); toast('Премахнат'); viewTeam(main); }catch(err){ toast(err.message,true); } }; });
+}
+
+/* ==================== АДМИНИСТРАЦИЯ: РОЛИ И ПРАВА ==================== */
+let adminRoleId=null;
+async function viewAdmin(main){
+  let access={};
+  try{ access=await api('/rbac/my-access'); }catch{}
+  main.innerHTML=pageH('Роли и права','Кой какво може да прави и кой има достъп от мобилното приложение',
+    access.is_admin?`<button id="ad-seed">Създай предефинираните роли</button><button id="ad-new" class="primary">${ic('plus')}Нова роля</button>`:'')
+    +`${access.is_admin?'':`<div class="card" style="margin-bottom:16px;">${empty('Само администратор управлява роли. Обърни се към администратор на дружеството.')}</div>`}
+    <div class="cols-3"><div id="ad-roles">${loading()}</div><div id="ad-detail"></div></div>`;
+  if(access.is_admin){
+    document.getElementById('ad-seed').onclick=async()=>{
+      try{ await api('/rbac/roles/seed',{method:'POST'}); toast('Предефинираните роли са създадени'); viewAdmin(main); }catch(e){ toast(e.message,true); } };
+    document.getElementById('ad-new').onclick=()=>roleForm(null);
+  }
+  loadRoles();
+}
+async function loadRoles(){
+  const box=document.getElementById('ad-roles'); if(!box) return;
+  let roles=[], members=[];
+  try{ roles=await api('/rbac/roles'); }catch(e){ box.innerHTML=`<div class="card">${empty(e.message)}</div>`; return; }
+  try{ members=await api('/members'); }catch{}
+  const count=r=>members.filter(m=>m.role_id===r.id).length;
+  box.innerHTML=`<div class="card"><div class="card-t"><h3>Роли</h3><span class="pill s-gray na">${roles.length}</span></div>
+    ${roles.length?`<table><thead><tr><th>Роля</th><th>Права</th><th>Мобилно</th><th>Хора</th><th class="num"></th></tr></thead><tbody>
+      ${roles.map(r=>`<tr${r.is_active?'':' style="opacity:.5"'}>
+        <td><div class="strong">${esc(r.name)}</div><div class="hint">${esc(r.code)}${r.is_system?' · системна':''}${r.is_admin?' · админ':''}</div></td>
+        <td>${r.permissions.includes('*')?'<span class="pill s-violet">пълни права</span>':`<span class="pill s-gray na">${r.permissions.length}</span>`}</td>
+        <td>${r.can_use_mobile?'<span class="pill s-green">да</span>':'<span class="pill s-gray na">не</span>'}</td>
+        <td>${count(r)||'<span class="muted-2">—</span>'}</td>
+        <td class="num"><button class="sm ad-open" data-id="${r.id}">Отвори</button></td></tr>`).join('')}</tbody></table>`
+      :empty('Няма роли. Натисни „Създай предефинираните роли".')}</div>`;
+  box.querySelectorAll('.ad-open').forEach(b=>b.onclick=()=>showRole(roles.find(x=>x.id===b.dataset.id), members));
+  if(adminRoleId){ const r=roles.find(x=>x.id===adminRoleId); if(r) showRole(r, members); }
+}
+async function showRole(role, members){
+  adminRoleId=role.id;
+  const box=document.getElementById('ad-detail'); if(!box) return;
+  box.innerHTML=loading();
+  let groups=[], access={};
+  try{ [groups,access]=await Promise.all([api('/rbac/permissions'),api('/rbac/my-access')]); }catch{}
+  const full=role.permissions.includes('*');
+  const has=c=>full||role.permissions.includes(c);
+  const editable=access.is_admin && !role.is_system;
+  const assigned=(members||[]).filter(m=>m.role_id===role.id);
+  box.innerHTML=`<div class="card stack">
+    <div class="card-t"><div><h3>${esc(role.name)}</h3><div class="hint">${esc(role.description||'')}</div></div>
+      <div class="flex">${role.is_system?'<span class="pill s-blue na">системна</span>':''}${role.is_active?'':'<span class="pill s-gray">неактивна</span>'}</div></div>
+    ${access.is_admin?`<div class="row" style="align-items:center;">
+      <label class="flex" style="gap:8px;cursor:pointer;font-size:13.5px;color:var(--ink-2);">
+        <input type="checkbox" id="ad-mobile" ${role.can_use_mobile?'checked':''} style="width:auto"/>Достъп от мобилното приложение</label>
+      <label class="flex" style="gap:8px;cursor:pointer;font-size:13.5px;color:var(--ink-2);">
+        <input type="checkbox" id="ad-active" ${role.is_active?'checked':''} style="width:auto"/>Активна</label>
+      <div class="spacer"></div>
+      ${role.is_system?`<button class="sm" id="ad-clone">Клонирай за редакция</button>`:`<button class="sm" id="ad-del">Изтрий</button>`}
+    </div>`:''}
+    ${full?'<div class="card" style="background:var(--accent-soft);border-color:var(--accent);"><b style="color:var(--accent-ink)">Пълни права</b> — тази роля минава всяка проверка.</div>':''}
+    <div>${groups.map(g=>`<div style="margin-bottom:12px;">
+      <h4 class="muted" style="margin-bottom:6px;">${esc(g.group)}</h4>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;">
+        ${g.permissions.map(p=>`<label class="flex" style="gap:7px;font-size:13px;color:${has(p.code)?'var(--ink-2)':'var(--muted-2)'};${editable?'cursor:pointer;':''}">
+          <input type="checkbox" class="ad-perm" value="${p.code}" ${has(p.code)?'checked':''} ${editable&&!full?'':'disabled'} style="width:auto"/>
+          <span>${esc(p.label)}</span></label>`).join('')}
+      </div></div>`).join('')}</div>
+    ${editable&&!full?`<button class="primary" id="ad-save">${ic('check')}Запази правата</button>`:''}
+    <div><h4 class="muted" style="margin-bottom:6px;">Хора с тази роля (${assigned.length})</h4>
+      ${assigned.length?`<div class="legend">${assigned.map(m=>`<div class="li"><span>${esc(m.email)}</span><span class="hint">${esc(m.full_name||'')}</span></div>`).join('')}</div>`:'<div class="hint">Никой още.</div>'}</div>
+  </div>`;
+  const patch=async(body)=>{ try{ await api(`/rbac/roles/${role.id}`,{method:'PATCH',body}); toast('Записано'); loadRoles(); }catch(e){ toast(e.message,true); loadRoles(); } };
+  document.getElementById('ad-mobile')?.addEventListener('change',e=>patch({can_use_mobile:e.target.checked}));
+  document.getElementById('ad-active')?.addEventListener('change',e=>patch({is_active:e.target.checked}));
+  document.getElementById('ad-save')?.addEventListener('click',()=>{
+    const perms=[...box.querySelectorAll('.ad-perm:checked')].map(c=>c.value);
+    patch({permissions:perms}); });
+  document.getElementById('ad-clone')?.addEventListener('click',async()=>{
+    const name=prompt('Име на новата роля:', role.name+' (копие)'); if(!name) return;
+    const code=prompt('Код (латиница, без интервали):', role.code+'_COPY'); if(!code) return;
+    try{ const nr=await api(`/rbac/roles/${role.id}/clone`,{method:'POST',body:{code,name}});
+      toast('Ролята е клонирана'); adminRoleId=nr.id; loadRoles(); }catch(e){ toast(e.message,true); } });
+  document.getElementById('ad-del')?.addEventListener('click',async()=>{
+    if(!confirm(`Изтриване на роля „${role.name}"?`)) return;
+    try{ await api(`/rbac/roles/${role.id}`,{method:'DELETE'}); toast('Изтрита'); adminRoleId=null; loadRoles(); document.getElementById('ad-detail').innerHTML=''; }
+    catch(e){ toast(e.message,true); } });
+}
+function roleForm(){
+  const box=document.getElementById('ad-detail'); if(!box) return;
+  box.innerHTML=`<div class="card stack"><h3>Нова роля</h3>
+    <div class="row"><div class="field grow"><label>Наименование</label><input id="nr-name" placeholder="напр. Касиер"/></div>
+      <div class="field"><label>Код</label><input id="nr-code" placeholder="CASHIER"/></div></div>
+    <div class="field"><label>Описание</label><input id="nr-desc"/></div>
+    <div class="row"><label class="flex" style="gap:8px;cursor:pointer;font-size:13.5px;"><input type="checkbox" id="nr-mob" style="width:auto"/>Мобилен достъп</label>
+      <label class="flex" style="gap:8px;cursor:pointer;font-size:13.5px;"><input type="checkbox" id="nr-adm" style="width:auto"/>Администратор</label></div>
+    <div class="hint">Правата се задават след създаването.</div>
+    <div class="flex"><button class="primary" id="nr-save">Създай</button><button class="ghost" onclick="document.getElementById('ad-detail').innerHTML=''">Отказ</button></div></div>`;
+  document.getElementById('nr-save').onclick=async()=>{
+    const body={ name:document.getElementById('nr-name').value, code:document.getElementById('nr-code').value,
+      description:document.getElementById('nr-desc').value||null, permissions:[],
+      can_use_mobile:document.getElementById('nr-mob').checked, is_admin:document.getElementById('nr-adm').checked };
+    if(!body.name||!body.code){ toast('Попълни име и код',true); return; }
+    try{ const r=await api('/rbac/roles',{method:'POST',body}); toast('Ролята е създадена'); adminRoleId=r.id; loadRoles(); }
+    catch(e){ toast(e.message,true); } };
 }
 
 /* ==================== ОДИТ ==================== */

@@ -27,8 +27,13 @@ services:
       DATABASE_URL: postgresql+psycopg://aifos:aifos@db:5432/aifos
       # Prod: схемата се управлява с Alembic (не с авто-създаване).
       AUTO_CREATE_TABLES: "false"
-      SECRET_KEY: "CHANGE-ME-IN-PRODUCTION"
+      # Задължителен и силен: при ENVIRONMENT=production API-то отказва да стартира
+      # с дефолтен, празен или по-къс от 32 байта ключ. Генериране: openssl rand -hex 32
+      SECRET_KEY: ${SECRET_KEY:?Задай SECRET_KEY в .env — генерирай с: openssl rand -hex 32}
       ENVIRONMENT: production
+      # Ако пред API-то има reverse proxy (Caddy/nginx), включи, за да се вижда реалният
+      # клиентски IP при ограничаването на опитите за вход:
+      # RATE_LIMIT_TRUST_PROXY_HEADER: "true"
       # AI: подай реалния ключ през средата, за да активираш Claude.
       # ANTHROPIC_API_KEY: "sk-ant-..."
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"

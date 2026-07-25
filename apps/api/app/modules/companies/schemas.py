@@ -70,6 +70,8 @@ class MemberOut(BaseModel):
     email: str
     full_name: str | None
     role: CompanyRole
+    role_id: uuid.UUID | None = None   # гъвкава роля от RBAC модула
+    role_name: str | None = None
 
 
 class MemberAdd(BaseModel):

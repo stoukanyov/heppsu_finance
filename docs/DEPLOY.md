@@ -101,6 +101,37 @@ ENVIRONMENT=production
 openssl rand -hex 32
 ```
 
+> **Fail-fast:** при `ENVIRONMENT=production` (както и `prod` / `staging`) приложението
+> **отказва да стартира**, ако `SECRET_KEY` е празен, е оставен на стойността по
+> подразбиране `dev-secret-change-me`, или е под 32 байта. Грешката се появява веднага в
+> `docker compose logs api`, а не при първата заявка. В `local` / `development` / `test`
+> дефолтът си остава удобен и не пречи.
+>
+> `JWT_ALGORITHM` се проверява във всички среди — позволени са само `HS256`, `HS384`,
+> `HS512`. Стойност `none` се отхвърля (класическа `alg=none` атака); при декодиране
+> алгоритъмът винаги идва от конфигурацията, никога от самия токен.
+
+### Ограничаване на опитите за вход (brute force)
+
+`POST /auth/login` е ограничен с плъзгащ прозорец в паметта на процеса — по **комбинация
+от клиентски IP и имейл**. При изчерпан праг връща `429` с header `Retry-After`; успешният
+вход нулира брояча. Настройки (по избор в `.env`):
+
+```dotenv
+RATE_LIMIT_ENABLED=true                 # по подразбиране true
+LOGIN_RATE_LIMIT_ATTEMPTS=5             # неуспешни опита...
+LOGIN_RATE_LIMIT_WINDOW_SECONDS=900     # ...за 15 минути
+RATE_LIMIT_TRUST_PROXY_HEADER=true      # зад Caddy — реалният IP е в X-Forwarded-For
+```
+
+> `RATE_LIMIT_TRUST_PROXY_HEADER` включвай **само** когато API-то не е директно достъпно
+> от интернет (при описаната тук схема с Caddy това е така). Ако е директно достъпно,
+> header-ът е подправяем и ограничението се заобикаля.
+>
+> Броенето е за процес: с `--workers 2` реалният праг е до 2× зададения. За точен общ
+> лимит при много процеси/машини се сменя само хранилището (напр. Redis) в
+> `apps/api/app/core/rate_limit.py`.
+
 ### Обвързване на compose с .env
 
 Обнови `docker-compose.yml`, така че `db` и `api` да четат от `.env` (пример за env стойностите):
@@ -243,6 +274,10 @@ docker compose logs -f api
 ## 9. Сигурност (чеклист)
 
 - [ ] Силни, уникални `SECRET_KEY` и парола за БД (в `.env`, извън git — виж `.gitignore`).
+      Проверява се автоматично при старт, когато `ENVIRONMENT=production`.
+- [ ] `ENVIRONMENT=production` е зададено (иначе строгите проверки са изключени).
+- [ ] Brute force защитата на `/auth/login` е включена и `RATE_LIMIT_TRUST_PROXY_HEADER`
+      съответства на това дали има reverse proxy.
 - [ ] Портовете 5432 и 8000 **не** са публични (само 80/443 през Caddy).
 - [ ] SSH само с ключ (изключи парола: `PasswordAuthentication no` в sshd_config).
 - [ ] Автоматични security ъпдейти: `sudo apt install unattended-upgrades`.
@@ -256,6 +291,8 @@ docker compose logs -f api
 
 | Симптом | Проверка |
 |---|---|
+| `InsecureConfigurationError` при старт | Слаб/дефолтен `SECRET_KEY` или недопустим `JWT_ALGORITHM` — виж раздел 4 |
+| `429` при вход | Изчерпани опити за този IP+имейл; изчакай `Retry-After` секунди |
 | 502 от Caddy | `docker compose logs api` — стартирал ли е uvicorn; минали ли са миграциите |
 | Миграциите падат | `docker compose exec api alembic current` / `alembic history` |
 | Няма TLS | A записът сочи ли към сървъра; портове 80/443 отворени ли са (ufw) |

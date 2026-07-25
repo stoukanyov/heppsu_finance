@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../deadlines/deadlines_screen.dart';
 import '../documents/documents_screen.dart';
+import '../queue/queue_screen.dart';
 import '../reports/reports_screen.dart';
 import '../scanner/scanner_flow.dart';
 import '../vat/vat_screen.dart';
@@ -16,15 +17,42 @@ class HomeShell extends ConsumerStatefulWidget {
   ConsumerState<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends ConsumerState<HomeShell> {
+class _HomeShellState extends ConsumerState<HomeShell>
+    with WidgetsBindingObserver {
   int _index = 0;
 
   static const _titles = ['Документи', 'Срокове', 'ДДС', 'Отчети'];
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Опашката тръгва веднага след вход: качва всичко, което е чакало мрежа.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(uploadQueueProvider).start();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Връщане на преден план е добър момент да пробваме пак — възможно е
+    // мрежата да се е появила, докато приложението е било в заден план.
+    if (state == AppLifecycleState.resumed) {
+      ref.read(uploadQueueProvider).process();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final session = ref.watch(sessionProvider);
     final company = session.activeCompany;
+    final queued = ref.watch(queuePendingCountProvider).valueOrNull ?? 0;
 
     return Scaffold(
       appBar: AppBar(
@@ -49,6 +77,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           ],
         ),
         actions: [
+          // Значка с броя чакащи сканове — видима от всеки таб, защото е
+          // единственият знак, че нещо още не е стигнало до сървъра.
+          if (queued > 0)
+            IconButton(
+              tooltip: 'Опашка за качване',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const QueueScreen()),
+              ),
+              icon: Badge.count(
+                count: queued,
+                child: const Icon(Icons.cloud_upload_outlined),
+              ),
+            ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert_rounded),
             onSelected: (v) {
@@ -56,9 +97,22 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 ref.read(sessionProvider.notifier).logout();
               } else if (v == 'company') {
                 _showCompanySheet(context);
+              } else if (v == 'queue') {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const QueueScreen()),
+                );
               }
             },
             itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'queue',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.cloud_upload_outlined),
+                  title: Text('Опашка за качване'),
+                ),
+              ),
               if (session.companies.length > 1)
                 const PopupMenuItem(
                   value: 'company',

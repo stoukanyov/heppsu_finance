@@ -67,8 +67,20 @@ Future<void> startScanFlow(BuildContext context, WidgetRef ref) async {
   if (!context.mounted) return;
   Navigator.of(context, rootNavigator: true).pop(); // затвори индикатора
 
+  // Записваме в опашката ВЕДНАГА — оттук нататък сканът не може да се загуби,
+  // дори ако няма мрежа или приложението бъде затворено.
+  final companyId = ref.read(sessionProvider).activeCompanyId;
+  if (companyId == null) return;
+  final queued = await ref.read(uploadQueueProvider).enqueue(
+        draft: draft,
+        companyId: companyId,
+      );
+
+  if (!context.mounted) return;
   await Navigator.of(context).push(
-    MaterialPageRoute(builder: (_) => ScanReviewScreen(draft: draft)),
+    MaterialPageRoute(
+      builder: (_) => ScanReviewScreen(draft: draft, queueItemId: queued.id),
+    ),
   );
   ref.invalidate(documentsListProvider);
 }

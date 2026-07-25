@@ -82,3 +82,36 @@ def get_company_context(
 
 
 CurrentCompany = Annotated[CompanyContext, Depends(get_company_context)]
+
+
+def require(permission: str):
+    """Dependency-фабрика: изисква конкретно право от RBAC каталога.
+
+    Ползва се декларативно в рутерите:
+
+        @router.post("/entries", dependencies=[require("accounting.create_entry")])
+
+    Отказът връща 403 с четимо съобщение и машинен код `PERMISSION_DENIED`.
+    """
+    from app.modules.rbac.permissions import ALL_PERMISSIONS
+
+    if permission not in ALL_PERMISSIONS:  # ранна грешка при печатна грешка в кода
+        raise ValueError(f"Непознато право: {permission}")
+
+    def _guard(ctx: CurrentCompany, db: DbSession) -> None:
+        from app.modules.rbac import service as rbac_service
+
+        rbac_service.require_permission(db, ctx.membership, permission)
+
+    return Depends(_guard)
+
+
+def require_mobile():
+    """Dependency: изисква роля с разрешен достъп от мобилното приложение."""
+
+    def _guard(ctx: CurrentCompany, db: DbSession) -> None:
+        from app.modules.rbac import service as rbac_service
+
+        rbac_service.require_mobile_access(db, ctx.membership)
+
+    return Depends(_guard)

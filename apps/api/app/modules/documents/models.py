@@ -8,6 +8,7 @@ from sqlalchemy import (
     BigInteger,
     Enum as SAEnum,
     ForeignKey,
+    Index,
     String,
     Uuid,
 )
@@ -53,6 +54,15 @@ class DocumentStatus(str, enum.Enum):
 
 class Document(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "documents"
+
+    # Списъкът на документите винаги е скоупнат по компания и подреден по дата
+    # (най-новите първи), а филтрите по статус и контрагент са най-честите — затова
+    # съставни индекси, а не само по company_id.
+    __table_args__ = (
+        Index("ix_documents_company_created_at", "company_id", "created_at"),
+        Index("ix_documents_company_status", "company_id", "status"),
+        Index("ix_documents_counterparty_id", "counterparty_id"),
+    )
 
     company_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("companies.id", ondelete="CASCADE"), index=True, nullable=False

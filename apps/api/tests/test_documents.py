@@ -52,6 +52,128 @@ def test_list_and_filter(client):
     assert len(received) == 2
 
 
+# ============================ Пагинация и търсене ============================
+def _upload_many(client, h, count: int, prefix: str = "doc") -> list[str]:
+    return [
+        _upload(client, h, content=f"%PDF-1.4 {prefix} {i}".encode(), name=f"{prefix}-{i}.pdf")
+        .json()["id"]
+        for i in range(count)
+    ]
+
+
+def test_list_pagination_and_total_count(client):
+    h = _setup(client, "doc-page@example.com")
+    _upload_many(client, h, 7, "stranica")
+
+    first = client.get(f"{DOC}?limit=3", headers=h)
+    assert first.status_code == 200
+    assert len(first.json()) == 3
+    assert first.headers["X-Total-Count"] == "7"      # общият брой, не броят на страницата
+
+    second = client.get(f"{DOC}?limit=3&offset=3", headers=h)
+    tail = client.get(f"{DOC}?limit=3&offset=6", headers=h)
+    assert len(second.json()) == 3
+    assert len(tail.json()) == 1
+    assert tail.headers["X-Total-Count"] == "7"
+
+    # страниците не се препокриват и заедно покриват всичко
+    ids = [d["id"] for d in first.json() + second.json() + tail.json()]
+    assert len(set(ids)) == 7
+
+    # отвъд края → празна страница, но верен общ брой
+    beyond = client.get(f"{DOC}?limit=3&offset=99", headers=h)
+    assert beyond.json() == []
+    assert beyond.headers["X-Total-Count"] == "7"
+
+
+def test_list_default_limit_and_shape(client):
+    """Отговорът остава чист списък (без обвивка) — уебът и мобилното разчитат на това."""
+    h = _setup(client, "doc-shape@example.com")
+    _upload_many(client, h, 2, "forma")
+    r = client.get(DOC, headers=h)
+    body = r.json()
+    assert isinstance(body, list) and len(body) == 2
+    assert r.headers["X-Total-Count"] == "2"
+
+
+def test_limit_over_maximum_is_clipped(client, monkeypatch):
+    """limit над максимума се реже, вместо да връща грешка."""
+    from app.modules.documents import service as documents_service
+
+    h = _setup(client, "doc-cap@example.com")
+    _upload_many(client, h, 4, "tavan")
+
+    monkeypatch.setattr(documents_service, "MAX_PAGE_LIMIT", 2)
+    r = client.get(f"{DOC}?limit=1000", headers=h)
+    assert r.status_code == 200
+    assert len(r.json()) == 2
+    assert r.headers["X-Total-Count"] == "4"
+
+
+def test_search_by_filename_notes_and_counterparty(client):
+    h = _setup(client, "doc-search@example.com")
+    cp_id = client.post(
+        CP, headers=h, json={"type": "SUPPLIER", "name": "Топлофикация София"}
+    ).json()["id"]
+    by_file = _upload(client, h, content=b"%PDF-1.4 a", name="naem-yuli.pdf").json()["id"]
+    by_note = _upload(client, h, content=b"%PDF-1.4 b", name="scan-002.pdf").json()["id"]
+    by_cp = _upload(client, h, content=b"%PDF-1.4 c", name="scan-003.pdf").json()["id"]
+    client.patch(f"{DOC}/{by_note}", headers=h, json={"notes": "Гориво за служебния автомобил"})
+    client.patch(f"{DOC}/{by_cp}", headers=h, json={"counterparty_id": cp_id})
+
+    # по име на файл, без оглед на регистъра
+    found = client.get(f"{DOC}?q=NAEM", headers=h)
+    assert [d["id"] for d in found.json()] == [by_file]
+    assert found.headers["X-Total-Count"] == "1"
+
+    # по бележки (кирилица, малки букви срещу главна начална)
+    assert [d["id"] for d in client.get(f"{DOC}?q=гориво", headers=h).json()] == [by_note]
+
+    # по име на контрагент (join)
+    assert [d["id"] for d in client.get(f"{DOC}?q=топлофикация", headers=h).json()] == [by_cp]
+
+    # нищо не съвпада
+    empty = client.get(f"{DOC}?q=няма-такъв-документ", headers=h)
+    assert empty.json() == [] and empty.headers["X-Total-Count"] == "0"
+
+    # спецсимволите на LIKE не са шаблон
+    assert client.get(f"{DOC}?q=%", headers=h).json() == []
+
+
+def test_search_combines_with_filters_and_pagination(client):
+    h = _setup(client, "doc-search-mix@example.com")
+    ids = [
+        _upload(client, h, content=f"%PDF-1.4 mix {i}".encode(), name=f"faktura-{i}.pdf")
+        .json()["id"]
+        for i in range(3)
+    ]
+    other = _upload(client, h, content=b"%PDF-1.4 other", name="dogovor.pdf").json()["id"]
+    client.patch(f"{DOC}/{ids[0]}", headers=h, json={"doc_type": "INVOICE_PURCHASE"})
+    client.patch(f"{DOC}/{ids[1]}", headers=h, json={"doc_type": "INVOICE_PURCHASE"})
+    client.patch(f"{DOC}/{other}", headers=h, json={"doc_type": "INVOICE_PURCHASE"})
+
+    r = client.get(f"{DOC}?q=faktura&doc_type=INVOICE_PURCHASE", headers=h)
+    assert r.headers["X-Total-Count"] == "2"
+    assert {d["id"] for d in r.json()} == {ids[0], ids[1]}
+
+    # търсенето се комбинира и с пагинацията
+    page = client.get(f"{DOC}?q=faktura&doc_type=INVOICE_PURCHASE&limit=1", headers=h)
+    assert len(page.json()) == 1
+    assert page.headers["X-Total-Count"] == "2"
+
+    # и със статуса
+    by_status = client.get(f"{DOC}?q=faktura&status=RECEIVED", headers=h)
+    assert by_status.headers["X-Total-Count"] == "3"
+
+
+def test_search_is_tenant_scoped(client):
+    h_a = _setup(client, "doc-search-a@example.com")
+    _upload(client, h_a, content=b"%PDF-1.4 taen", name="taen-dogovor.pdf")
+    h_b = _setup(client, "doc-search-b@example.com")
+    r = client.get(f"{DOC}?q=taen", headers=h_b)
+    assert r.json() == [] and r.headers["X-Total-Count"] == "0"
+
+
 def test_download_file(client):
     h = _setup(client, "doc5@example.com")
     doc_id = _upload(client, h).json()["id"]

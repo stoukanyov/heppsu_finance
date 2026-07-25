@@ -3,81 +3,105 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../core/network/api_exception.dart';
+import '../../core/queue/scan_queue_db.dart';
+import '../../core/queue/upload_queue.dart';
 import '../../core/scan/image_pipeline.dart';
 import '../../domain/models.dart';
 import '../common/widgets.dart';
 import '../documents/posting_card.dart';
 
-/// Етапи на екрана: качване → резултат (данни + предложение) → потвърдено.
-enum _Phase { uploading, done, failed }
-
-/// Преглед и качване на сканиран документ.
+/// Преглед на сканиран документ.
 ///
-/// Показва смаленото изображение, изпраща го към `POST /documents/scan`
-/// и веднага визуализира разпознатите данни и предложената счетоводна статия.
+/// Самото качване се прави от опашката (`UploadQueue`) — този екран само
+/// следи докъде е стигнала и показва резултата. Така сканът не зависи от
+/// това дали екранът е отворен: ако няма мрежа, той чака в опашката.
 class ScanReviewScreen extends ConsumerStatefulWidget {
-  const ScanReviewScreen({super.key, required this.draft});
+  const ScanReviewScreen({
+    super.key,
+    required this.draft,
+    required this.queueItemId,
+  });
 
   final ScanDraft draft;
+  final String queueItemId;
 
   @override
   ConsumerState<ScanReviewScreen> createState() => _ScanReviewScreenState();
 }
 
 class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
-  _Phase _phase = _Phase.uploading;
+  ScanQueueItem? _item;
   ScanResult? _result;
-  String? _error;
-  final _note = TextEditingController();
+  String? _loadError;
+  bool _loadingResult = false;
+
+  UploadQueue get _queue => ref.read(uploadQueueProvider);
 
   @override
   void initState() {
     super.initState();
-    _upload();
+    _queue.revision.addListener(_refresh);
+    _refresh();
   }
 
   @override
   void dispose() {
-    _note.dispose();
+    _queue.revision.removeListener(_refresh);
     super.dispose();
   }
 
-  Future<void> _upload() async {
+  Future<void> _refresh() async {
+    final item = await _queue.byId(widget.queueItemId);
+    if (!mounted) return;
+    setState(() => _item = item);
+
+    // Щом сървърът е приел скана, дърпаме разпознатото и предложението.
+    if (item?.status == QueueStatus.uploaded &&
+        item?.serverDocumentId != null &&
+        _result == null &&
+        !_loadingResult) {
+      await _loadResult(item!.serverDocumentId!);
+    }
+  }
+
+  Future<void> _loadResult(String documentId) async {
     setState(() {
-      _phase = _Phase.uploading;
-      _error = null;
+      _loadingResult = true;
+      _loadError = null;
     });
     try {
-      final res = await ref.read(documentsRepositoryProvider).submitScan(
-            bytes: widget.draft.bytes,
-            filename: widget.draft.filename,
-            contentType: widget.draft.contentType,
-            note: _note.text.trim(),
-          );
+      final repo = ref.read(documentsRepositoryProvider);
+      // `propose-posting` е идемпотентно — връща вече създадената чернова.
+      final results = await Future.wait([
+        repo.get(documentId),
+        repo.proposePosting(documentId),
+      ]);
       if (!mounted) return;
       setState(() {
-        _result = res;
-        _phase = _Phase.done;
+        _result = ScanResult(
+          document: results[0] as Document,
+          extraction: const Extraction(
+            id: '',
+            documentId: '',
+            model: '',
+            data: {},
+          ),
+          posting: results[1] as PostingProposal,
+        );
       });
     } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.isDuplicate
-            ? 'Този документ вече е качен.'
-            : e.message;
-        _phase = _Phase.failed;
-      });
+      if (mounted) setState(() => _loadError = e.message);
     } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _error = 'Няма връзка със сървъра. Опитай пак.';
-        _phase = _Phase.failed;
-      });
+      if (mounted) setState(() => _loadError = 'Данните не се заредиха.');
+    } finally {
+      if (mounted) setState(() => _loadingResult = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final item = _item;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Сканиран документ')),
       body: ListView(
@@ -85,12 +109,110 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
         children: [
           _ImagePreview(draft: widget.draft),
           const SizedBox(height: 20),
-          switch (_phase) {
-            _Phase.uploading => const _UploadingCard(),
-            _Phase.failed => _FailedCard(message: _error!, onRetry: _upload),
-            _Phase.done => _ResultSection(result: _result!),
-          },
+          if (item == null)
+            const _UploadingCard(message: 'Подготвям…')
+          else if (_result != null)
+            _ResultSection(result: _result!)
+          else
+            switch (item.status) {
+              QueueStatus.pending => const _QueuedCard(),
+              QueueStatus.uploading =>
+                const _UploadingCard(message: 'Изпращам и разпознавам…'),
+              QueueStatus.uploaded => _UploadingCard(
+                  message: _loadError ?? 'Зареждам разпознатото…',
+                ),
+              QueueStatus.failedRetryable => _RetryingCard(item: item),
+              QueueStatus.duplicate => const _FailedCard(
+                  message: 'Този документ вече е качен по-рано.',
+                ),
+              QueueStatus.failedPermanent => _FailedCard(
+                  message: item.lastError ?? 'Качването не мина.',
+                  onRetry: () => _queue.retryNow(item.id),
+                ),
+            },
         ],
+      ),
+    );
+  }
+}
+
+/// Сканът е записан локално и чака мрежа — най-важното съобщение в целия
+/// поток, защото казва на потребителя, че нищо не се е загубило.
+class _QueuedCard extends StatelessWidget {
+  const _QueuedCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(9),
+              decoration: BoxDecoration(
+                color: const Color(0xFFD97706).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.cloud_off_rounded,
+                  color: Color(0xFFD97706), size: 20),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Записан на телефона',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  SizedBox(height: 3),
+                  Text(
+                    'Ще се изпрати автоматично при първа връзка с мрежата. '
+                    'Може да затвориш екрана.',
+                    style: TextStyle(fontSize: 12.5, color: Colors.black54),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Неуспешен опит, но ще има следващ.
+class _RetryingCard extends StatelessWidget {
+  const _RetryingCard({required this.item});
+
+  final ScanQueueItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            const Icon(Icons.schedule_rounded,
+                color: Color(0xFFD97706), size: 30),
+            const SizedBox(height: 12),
+            Text(
+              'Опит ${item.attempts} не мина — ще опитам пак автоматично.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            if (item.lastError != null && item.lastError!.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                item.lastError!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12.5, color: Colors.black54),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -152,27 +274,30 @@ class _ImagePreview extends StatelessWidget {
 }
 
 class _UploadingCard extends StatelessWidget {
-  const _UploadingCard();
+  const _UploadingCard({required this.message});
+
+  final String message;
 
   @override
   Widget build(BuildContext context) {
-    return const Card(
+    return Card(
       child: Padding(
-        padding: EdgeInsets.all(24),
+        padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            SizedBox(
+            const SizedBox(
               width: 26,
               height: 26,
               child: CircularProgressIndicator(strokeWidth: 2.6),
             ),
-            SizedBox(height: 16),
+            const SizedBox(height: 16),
             Text(
-              'Изпращам и разпознавам…',
-              style: TextStyle(fontWeight: FontWeight.w600),
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontWeight: FontWeight.w600),
             ),
-            SizedBox(height: 4),
-            Text(
+            const SizedBox(height: 4),
+            const Text(
               'Сървърът извлича данните и подготвя счетоводната статия.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12.5, color: Colors.black54),
@@ -185,10 +310,10 @@ class _UploadingCard extends StatelessWidget {
 }
 
 class _FailedCard extends StatelessWidget {
-  const _FailedCard({required this.message, required this.onRetry});
+  const _FailedCard({required this.message, this.onRetry});
 
   final String message;
-  final VoidCallback onRetry;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -201,12 +326,14 @@ class _FailedCard extends StatelessWidget {
                 color: Color(0xFFDC2626), size: 32),
             const SizedBox(height: 12),
             Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Опитай пак'),
-            ),
+            if (onRetry != null) ...[
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Опитай пак'),
+              ),
+            ],
           ],
         ),
       ),

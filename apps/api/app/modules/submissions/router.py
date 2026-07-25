@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, Response, UploadFile, status
 
-from app.api.deps import CurrentCompany, DbSession
+from app.api.deps import CurrentCompany, DbSession, require
 from app.modules.submissions import service
 from app.modules.submissions.schemas import (
     SubmissionMarkSubmittedIn,
@@ -45,20 +45,20 @@ def list_providers() -> dict:
     }
 
 
-@router.get("/vat/{period_id}/preview", response_model=SubmissionPreviewOut)
+@router.get("/vat/{period_id}/preview", response_model=SubmissionPreviewOut, dependencies=[require("vat.view")])
 def preview_vat(period_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> SubmissionPreviewOut:
     """Финален преглед и контролни проверки преди подготовката на пакета."""
     return service.preview_vat_submission(db, ctx.company, period_id)
 
 
-@router.post("/vat/{period_id}/prepare", response_model=SubmissionOut, status_code=status.HTTP_201_CREATED)
+@router.post("/vat/{period_id}/prepare", response_model=SubmissionOut, status_code=status.HTTP_201_CREATED, dependencies=[require("submissions.prepare")])
 def prepare_vat(period_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> SubmissionOut:
     """„Подготви пакет за НАП" — генерира декларацията, дневниците и VIES (при нужда)."""
     sub = service.prepare_vat_package(db, ctx.company, ctx.membership.user_id, period_id)
     return SubmissionOut.model_validate(sub)
 
 
-@router.get("", response_model=list[SubmissionOut])
+@router.get("", response_model=list[SubmissionOut], dependencies=[require("vat.view")])
 def list_submissions(
     ctx: CurrentCompany, db: DbSession, period_id: uuid.UUID | None = None
 ) -> list[SubmissionOut]:
@@ -68,12 +68,12 @@ def list_submissions(
     ]
 
 
-@router.get("/{submission_id}", response_model=SubmissionOut)
+@router.get("/{submission_id}", response_model=SubmissionOut, dependencies=[require("vat.view")])
 def get_submission(submission_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> SubmissionOut:
     return SubmissionOut.model_validate(service.get_submission(db, ctx.company.id, submission_id))
 
 
-@router.get("/{submission_id}/package")
+@router.get("/{submission_id}/package", dependencies=[require("vat.view")])
 def download_package(submission_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> Response:
     """Изтегля пакета за качване в портала („Експортирай за подаване")."""
     sub, data = service.download_package(db, ctx.company.id, submission_id)
@@ -84,7 +84,7 @@ def download_package(submission_id: uuid.UUID, ctx: CurrentCompany, db: DbSessio
     )
 
 
-@router.post("/{submission_id}/mark-submitted", response_model=SubmissionOut)
+@router.post("/{submission_id}/mark-submitted", response_model=SubmissionOut, dependencies=[require("submissions.record")])
 def mark_submitted(
     submission_id: uuid.UUID,
     data: SubmissionMarkSubmittedIn,
@@ -97,7 +97,7 @@ def mark_submitted(
     )
 
 
-@router.post("/{submission_id}/receipt", response_model=SubmissionOut, status_code=status.HTTP_201_CREATED)
+@router.post("/{submission_id}/receipt", response_model=SubmissionOut, status_code=status.HTTP_201_CREATED, dependencies=[require("submissions.record")])
 async def import_receipt(
     submission_id: uuid.UUID,
     ctx: CurrentCompany,

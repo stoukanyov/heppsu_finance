@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/network/api_client.dart';
 import '../core/network/api_exception.dart';
 import '../core/notifications/reminder_service.dart';
+import '../core/queue/scan_queue_db.dart';
+import '../core/queue/upload_queue.dart';
 import '../core/security/secure_store.dart';
 import '../data/repositories.dart';
 import '../domain/models.dart';
@@ -46,6 +50,47 @@ final deadlinesRepositoryProvider = Provider<DeadlinesRepository>(
 
 final reminderServiceProvider = Provider<ReminderService>(
   (ref) => ReminderService(),
+);
+
+// -------------------------------------------------------- опашка за качване
+
+final scanQueueDbProvider = Provider<ScanQueueDb>((ref) => ScanQueueDb());
+
+final uploadQueueProvider = Provider<UploadQueue>((ref) {
+  final queue = UploadQueue(
+    db: ref.watch(scanQueueDbProvider),
+    // Repository се взима лениво: опашката преживява смяна на компанията.
+    repository: () => ref.read(documentsRepositoryProvider),
+  );
+  ref.onDispose(queue.dispose);
+  return queue;
+});
+
+/// Брой сканове, които още не са стигнали до сървъра — за значката в таба.
+final queuePendingCountProvider = StreamProvider<int>((ref) async* {
+  final queue = ref.watch(uploadQueueProvider);
+  yield await queue.pendingCount();
+  // `revision` се увеличава при всяка промяна в опашката.
+  final controller = StreamController<int>();
+  void listener() async {
+    controller.add(await queue.pendingCount());
+  }
+
+  queue.revision.addListener(listener);
+  ref.onDispose(() {
+    queue.revision.removeListener(listener);
+    controller.close();
+  });
+  yield* controller.stream;
+});
+
+final queueItemsProvider = FutureProvider.autoDispose<List<ScanQueueItem>>(
+  (ref) {
+    final queue = ref.watch(uploadQueueProvider);
+    // Пре-абонираме се, за да се опреснява списъкът при промяна.
+    ref.watch(queuePendingCountProvider);
+    return queue.items();
+  },
 );
 
 // ------------------------------------------------------- данни за екраните
@@ -284,8 +329,18 @@ class SessionController extends StateNotifier<SessionState> {
     state = const SessionState(stage: SessionStage.unauthenticated);
   }
 
+  /// Изход: чисти токена, напомнянията и локалните сканове.
+  ///
+  /// Опашката се изтрива нарочно — фактурите съдържат лични данни и не бива
+  /// да остават на телефона след излизане от акаунта.
   Future<void> logout() async {
     await _auth.logout();
+    try {
+      await _ref.read(reminderServiceProvider).cancelAll();
+      await _ref.read(uploadQueueProvider).clear();
+    } catch (_) {
+      // Изходът не бива да се проваля заради почистването.
+    }
     state = const SessionState(stage: SessionStage.unauthenticated);
   }
 }

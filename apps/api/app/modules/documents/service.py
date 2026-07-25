@@ -3,7 +3,7 @@ import hashlib
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -33,6 +33,12 @@ ALLOWED_TRANSITIONS: dict[DocumentStatus, set[DocumentStatus]] = {
     DocumentStatus.ARCHIVED: set(),
     DocumentStatus.CANCELLED: set(),
 }
+
+
+# Пагинация на списъка с документи: при няколко хиляди записа пълният списък
+# натоварва и сървъра, и телефона.
+DEFAULT_PAGE_LIMIT = 50
+MAX_PAGE_LIMIT = 200
 
 
 def _err(msg: str, code: int = status.HTTP_422_UNPROCESSABLE_ENTITY) -> HTTPException:
@@ -90,13 +96,19 @@ def create_document(
     return doc
 
 
-def list_documents(
-    db: Session,
+def _escape_like(text: str) -> str:
+    """Екранира спецсимволите на LIKE, за да не се тълкуват като шаблон."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _documents_query(
     company_id: uuid.UUID,
-    status_filter: DocumentStatus | None = None,
-    doc_type: DocumentType | None = None,
-    counterparty_id: uuid.UUID | None = None,
-) -> list[Document]:
+    status_filter: DocumentStatus | None,
+    doc_type: DocumentType | None,
+    counterparty_id: uuid.UUID | None,
+    q: str | None,
+) -> Select:
+    """Общата заявка за списъка — ползва се и за страницата, и за общия брой."""
     stmt = select(Document).where(Document.company_id == company_id)
     if status_filter is not None:
         stmt = stmt.where(Document.status == status_filter)
@@ -104,7 +116,50 @@ def list_documents(
         stmt = stmt.where(Document.doc_type == doc_type)
     if counterparty_id is not None:
         stmt = stmt.where(Document.counterparty_id == counterparty_id)
-    return list(db.scalars(stmt.order_by(Document.created_at.desc())))
+
+    text = (q or "").strip()
+    if text:
+        pattern = f"%{_escape_like(text.lower())}%"
+        # Свободният текст търси по име на файл, бележки и име на контрагента.
+        # LEFT JOIN, защото документ без контрагент също трябва да се намира.
+        stmt = stmt.outerjoin(Counterparty, Document.counterparty_id == Counterparty.id).where(
+            or_(
+                func.lower(Document.original_filename).like(pattern, escape="\\"),
+                func.lower(Document.notes).like(pattern, escape="\\"),
+                func.lower(Counterparty.name).like(pattern, escape="\\"),
+            )
+        )
+    return stmt
+
+
+def list_documents(
+    db: Session,
+    company_id: uuid.UUID,
+    status_filter: DocumentStatus | None = None,
+    doc_type: DocumentType | None = None,
+    counterparty_id: uuid.UUID | None = None,
+    q: str | None = None,
+    limit: int = DEFAULT_PAGE_LIMIT,
+    offset: int = 0,
+) -> tuple[list[Document], int]:
+    """Страница от документите + общия брой съвпадения (за `X-Total-Count`).
+
+    `limit` се реже до `MAX_PAGE_LIMIT` вместо да връща грешка — клиентът получава
+    най-многото, което сървърът е готов да даде, без излишен неуспех.
+    """
+    limit = min(max(int(limit), 1), MAX_PAGE_LIMIT)
+    offset = max(int(offset), 0)
+
+    stmt = _documents_query(company_id, status_filter, doc_type, counterparty_id, q)
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = list(
+        db.scalars(
+            stmt.order_by(Document.created_at.desc(), Document.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    )
+    return rows, total
 
 
 def get_document(db: Session, company_id: uuid.UUID, doc_id: uuid.UUID) -> Document:

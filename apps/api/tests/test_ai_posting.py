@@ -735,3 +735,191 @@ def test_confirm_posting_without_proposal_is_rejected(client):
     r = client.post(f"{DOC}/{doc_id}/confirm-posting", headers=h)
     assert r.status_code == 409, r.text
     assert "няма предложена" in r.json()["detail"]
+
+
+# ============================ Ръчна корекция на разпознатите данни ============================
+def _correct(client, h, doc_id, fields: dict, recalculate: bool = True):
+    return client.patch(
+        f"{DOC}/{doc_id}/extraction",
+        headers=h,
+        json={"fields": fields, "recalculate": recalculate},
+    )
+
+
+def test_correction_updates_proposal_amount(client, monkeypatch):
+    """AI е разчел 120.00 вместо 1200.00 — корекцията дава ново предложение."""
+    _patch_stub(monkeypatch, {
+        "issuer": "Грешно Разчетено ЕООД",
+        "issuer_vat_number": "BG112233445",
+        "document_number": "F-1",
+        "document_date": "2026-07-15",
+        "currency": "EUR",
+        "tax_base": 100.0,
+        "vat_amount": 20.0,
+        "total": 120.0,
+    }, overall=0.4)
+    h, acc = _setup(client, "fix-amount@example.com")
+    doc_id = _upload(client, h)
+    client.patch(f"{DOC}/{doc_id}", headers=h, json={"doc_type": "INVOICE_PURCHASE"})
+    _extract(client, h, doc_id)
+    first = client.post(f"{DOC}/{doc_id}/propose-posting", headers=h).json()
+    old_entry_id = first["entry"]["id"]
+    assert float(first["entry"]["total_debit"]) == 120.0
+
+    r = _correct(client, h, doc_id, {"total": 1200.00, "tax_base": 1000.00, "vat_amount": 200.00})
+    assert r.status_code == 200, r.text
+    entry = r.json()["posting"]["entry"]
+    assert entry is not None
+    assert entry["id"] != old_entry_id            # старата чернова е заменена, не допълнена
+    assert entry["status"] == "DRAFT"             # AI пак само предлага
+    lines = _by_code(acc, entry)
+    assert float(lines["602"]["debit"]) == 1000.0
+    assert float(lines["4531"]["debit"]) == 200.0
+    assert float(lines["401"]["credit"]) == 1200.0
+
+    # без сираци: остава точно една статия и документът сочи към нея
+    entries = client.get(f"{ACC}/journal-entries", headers=h).json()
+    assert [e["id"] for e in entries] == [entry["id"]]
+    doc = client.get(f"{DOC}/{doc_id}", headers=h).json()
+    assert doc["journal_entry_id"] == entry["id"]
+    assert doc["status"] == "PROPOSED"            # излязъл е от NEEDS_REVIEW
+
+
+def test_correction_merges_and_keeps_untouched_fields(client):
+    """Merge, не replace: неподадените полета оцеляват."""
+    h, _ = _setup(client, "fix-merge@example.com")
+    doc_id = _upload(client, h)
+    before = _extract(client, h, doc_id)["data"]["fields"]
+
+    r = _correct(client, h, doc_id, {"total": 250.00}, recalculate=False)
+    assert r.status_code == 200, r.text
+    after = r.json()["extraction"]["data"]["fields"]
+
+    assert after["total"] == 250.00
+    assert after["issuer"] == before["issuer"]
+    assert after["document_number"] == before["document_number"]
+    assert after["document_date"] == before["document_date"]
+    assert after["currency"] == before["currency"]
+
+    # втора корекция се наслагва върху първата
+    second = _correct(client, h, doc_id, {"issuer": "Поправен Доставчик ЕООД"}, recalculate=False)
+    fields = second.json()["extraction"]["data"]["fields"]
+    assert fields["issuer"] == "Поправен Доставчик ЕООД"
+    assert fields["total"] == 250.00
+    assert sorted(second.json()["extraction"]["data"]["corrected_fields"]) == ["issuer", "total"]
+
+
+def test_corrected_field_is_marked_as_human(client):
+    """Ръчно потвърденото поле вече не е AI предположение и не сваля увереността."""
+    h, _ = _setup(client, "fix-confidence@example.com")
+    doc_id = _upload(client, h)
+    before = _extract(client, h, doc_id)["data"]
+    assert before["overall_confidence"] == 0.62
+    assert before["field_confidence"]["total"] == 0.85
+
+    data = _correct(client, h, doc_id, {"total": 130.00}, recalculate=False).json()["extraction"]["data"]
+
+    assert data["field_confidence"]["total"] == 1.0        # човешко потвърждение
+    assert data["corrected_fields"] == ["total"]
+    assert data["ai_overall_confidence"] == 0.62           # какво е казал моделът, се пази
+    assert data["overall_confidence"] > 0.62               # корекцията вдига доверието
+    assert data["corrections"][-1]["fields"] == ["total"]
+
+
+def test_correction_of_posted_document_is_rejected(client):
+    """Осчетоводен документ се коригира само със сторно."""
+    h, _ = _setup(client, "fix-posted@example.com")
+    doc_id = _upload(client, h)
+    _extract(client, h, doc_id)
+    client.post(f"{DOC}/{doc_id}/propose-posting", headers=h)
+    confirmed = client.post(f"{DOC}/{doc_id}/confirm-posting", headers=h)
+    assert confirmed.status_code == 200, confirmed.text
+    entry_id = confirmed.json()["entry"]["id"]
+
+    r = _correct(client, h, doc_id, {"total": 999.00})
+    assert r.status_code == 409, r.text
+    assert "сторно" in r.json()["detail"]
+
+    # осчетоводената статия не е пипана
+    entry = client.get(f"{ACC}/journal-entries/{entry_id}", headers=h).json()
+    assert entry["status"] == "POSTED"
+    assert float(entry["total_debit"]) == 120.0
+
+
+def test_correction_validates_amounts_and_dates(client):
+    h, _ = _setup(client, "fix-invalid@example.com")
+    doc_id = _upload(client, h)
+    _extract(client, h, doc_id)
+
+    not_a_number = _correct(client, h, doc_id, {"total": "сто и двайсет"})
+    assert not_a_number.status_code == 422, not_a_number.text
+    assert "total" in not_a_number.json()["detail"]
+
+    negative = _correct(client, h, doc_id, {"vat_amount": -5})
+    assert negative.status_code == 422
+    assert "отрицател" in negative.json()["detail"]
+    assert "vat_amount" in negative.json()["detail"]
+
+    bad_date = _correct(client, h, doc_id, {"document_date": "15.07.2026"})
+    assert bad_date.status_code == 422
+    assert "document_date" in bad_date.json()["detail"]
+
+    empty = _correct(client, h, doc_id, {})
+    assert empty.status_code == 422
+    assert "корекция" in empty.json()["detail"]
+
+    # нищо от невалидните опити не е записано
+    fields = client.get(f"{DOC}/{doc_id}", headers=h)
+    assert fields.status_code == 200
+    data = _correct(client, h, doc_id, {"total": "1 234,56"}, recalculate=False)
+    assert data.status_code == 200, data.text          # текст с интервал и запетая се приема
+    assert data.json()["extraction"]["data"]["fields"]["total"] == 1234.56
+
+
+def test_correction_without_recalculate_keeps_draft(client):
+    """`recalculate=false` не пипа предложението — само поправя данните."""
+    h, _ = _setup(client, "fix-norecalc@example.com")
+    doc_id = _upload(client, h)
+    _extract(client, h, doc_id)
+    entry_id = client.post(f"{DOC}/{doc_id}/propose-posting", headers=h).json()["entry"]["id"]
+
+    r = _correct(client, h, doc_id, {"total": 500.00}, recalculate=False)
+    assert r.status_code == 200, r.text
+    assert r.json()["posting"]["entry"]["id"] == entry_id
+    assert float(r.json()["posting"]["entry"]["total_debit"]) == 120.0
+    assert len(client.get(f"{ACC}/journal-entries", headers=h).json()) == 1
+
+
+def test_correction_without_extraction_creates_manual_data(client):
+    """Документ без AI разпознаване може да се въведе изцяло на ръка."""
+    h, acc = _setup(client, "fix-manual@example.com")
+    doc_id = _upload(client, h, content=b"%PDF-1.4 bez ocr fix")
+    client.patch(f"{DOC}/{doc_id}", headers=h, json={"doc_type": "INVOICE_PURCHASE"})
+
+    r = _correct(client, h, doc_id, {
+        "issuer": "Ръчно Въведен ЕООД",
+        "issuer_vat_number": "BG207777888",
+        "document_number": "R-1",
+        "document_date": "2026-05-20",
+        "currency": "EUR",
+        "tax_base": 500.00,
+        "vat_amount": 100.00,
+        "total": 600.00,
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["extraction"]["model"] == "human"
+    entry = body["posting"]["entry"]
+    assert entry is not None
+    lines = _by_code(acc, entry)
+    assert float(lines["602"]["debit"]) == 500.0
+    assert float(lines["4531"]["debit"]) == 100.0
+    assert float(lines["401"]["credit"]) == 600.0
+    assert body["document"]["status"] == "PROPOSED"
+
+
+def test_correction_tenant_isolation(client):
+    h_a, _ = _setup(client, "fix-tenant-a@example.com")
+    doc_id = _upload(client, h_a, content=b"%PDF-1.4 fix tenant")
+    h_b, _ = _setup(client, "fix-tenant-b@example.com")
+    assert _correct(client, h_b, doc_id, {"total": 1.00}).status_code == 404

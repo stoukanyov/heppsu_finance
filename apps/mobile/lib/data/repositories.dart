@@ -52,11 +52,15 @@ class DocumentsRepository {
   final ApiClient _api;
 
   /// Комбиниран мобилен scan: качва байтовете и връща документ + extraction.
+  ///
+  /// `companyId` се подава от опашката: сканът трябва да стигне до компанията,
+  /// в която е направен, дори ако потребителят е сменил активната междувременно.
   Future<ScanResult> submitScan({
     required Uint8List bytes,
     required String filename,
     required String contentType,
     String? note,
+    String? companyId,
   }) async {
     final form = FormData.fromMap({
       'file': MultipartFile.fromBytes(
@@ -66,7 +70,11 @@ class DocumentsRepository {
       ),
       if (note != null && note.isNotEmpty) 'note': note,
     });
-    final data = await _api.post('/documents/scan', data: form);
+    final data = await _api.post(
+      '/documents/scan',
+      data: form,
+      companyId: companyId,
+    );
     return ScanResult.fromJson((data as Map).cast<String, dynamic>());
   }
 

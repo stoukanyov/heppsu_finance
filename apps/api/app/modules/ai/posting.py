@@ -78,6 +78,19 @@ _ALIASES: dict[str, tuple[str, ...]] = {
     "doc_kind": ("document_type", "doc_type", "kind"),
 }
 
+# Полета, чиято стойност трябва да е число ≥ 0 при ръчна корекция.
+AMOUNT_FIELDS: frozenset[str] = frozenset(
+    _ALIASES["total"] + _ALIASES["net"] + _ALIASES["vat"]
+) | {"vat_rate", "amount", "unit_price", "quantity", "discount"}
+
+# Полета, чиято стойност трябва да е ISO дата (ГГГГ-ММ-ДД) при ръчна корекция.
+DATE_FIELDS: frozenset[str] = frozenset(_ALIASES["doc_date"]) | {
+    "due_date",
+    "tax_event_date",
+    "payment_date",
+    "delivery_date",
+}
+
 
 def _q(amount: Decimal) -> Decimal:
     return amount.quantize(_CENT, rounding=ROUND_HALF_UP)
@@ -125,7 +138,8 @@ def _as_date(value) -> dt.date | None:
     return None
 
 
-def _latest_extraction(db: Session, doc: Document) -> DocumentExtraction | None:
+def latest_extraction(db: Session, doc: Document) -> DocumentExtraction | None:
+    """Последното разпознаване за документа (AI или ръчно коригирано)."""
     return db.scalar(
         select(DocumentExtraction)
         .where(DocumentExtraction.document_id == doc.id)
@@ -236,7 +250,7 @@ def file_document_to_counterparty(
     if doc.counterparty_id is not None:
         return db.get(Counterparty, doc.counterparty_id)
 
-    extraction = _latest_extraction(db, doc)
+    extraction = latest_extraction(db, doc)
     if extraction is None:
         return None
 
@@ -415,6 +429,42 @@ def _existing_proposal(
     )
 
 
+def current_proposal(
+    db: Session, doc: Document, confidence: float = 0.0
+) -> PostingProposalOut | None:
+    """Вече свързаната статия като предложение — без да се създава нова.
+
+    Ползва се при корекция без преизчисление: мобилното пак получава какво стои
+    в момента зад документа.
+    """
+    return _existing_proposal(db, doc, confidence)
+
+
+def discard_draft_proposal(db: Session, doc: Document) -> bool:
+    """Изтрива черновата, предложена по старите данни, и я откача от документа.
+
+    Връща True, ако е имало какво да се изтрие. Осчетоводена статия НИКОГА не се
+    пипа — тя се коригира само със сторно. Редовете падат заедно със статията
+    (delete-orphan), така че сираци не остават; `doc.journal_entry_id` се нулира,
+    за да може `propose_posting` да предложи наново, без да се самоблокира от
+    идемпотентността.
+    """
+    if doc.journal_entry_id is None:
+        return False
+    entry = db.get(JournalEntry, doc.journal_entry_id)
+    doc.journal_entry_id = None
+    if entry is None or entry.company_id != doc.company_id:
+        db.commit()
+        return False
+    if entry.status != EntryStatus.DRAFT:
+        # Защитна мрежа: извикващият вече е проверил статуса.
+        doc.journal_entry_id = entry.id
+        return False
+    db.delete(entry)
+    db.commit()
+    return True
+
+
 def _fail(rationale: str, warnings: list[str], confidence: float) -> PostingProposalOut:
     return PostingProposalOut(
         entry=None, confidence=confidence, rationale=rationale, warnings=warnings
@@ -432,7 +482,7 @@ def propose_posting(
 ) -> PostingProposalOut:
     """Съставя предложение за счетоводна статия (DRAFT) по разпознатите данни."""
     doc = documents_service.get_document(db, company.id, doc_id)
-    extraction = _latest_extraction(db, doc)
+    extraction = latest_extraction(db, doc)
 
     if extraction is None:
         return _fail(

@@ -5,7 +5,7 @@
 """
 from fastapi import APIRouter, HTTPException, Response, status
 
-from app.api.deps import CurrentCompany, DbSession
+from app.api.deps import CurrentCompany, DbSession, require
 from app.modules.income_report import generator
 from app.modules.income_report.schemas import (
     Chl736Payer,
@@ -16,7 +16,7 @@ from app.modules.income_report.schemas import (
 router = APIRouter(prefix="/income-reports", tags=["income-reports"])
 
 
-@router.post("/chl73-6/xml")
+@router.post("/chl73-6/xml", dependencies=[require("reports.export")])
 def generate_chl73_6(report: Chl736Report, ctx: CurrentCompany, db: DbSession) -> Response:
     """Генерира SPR73_6.xml от подадените данни за изплатени доходи по трудови правоотношения."""
     # Платецът по подразбиране е текущата компания (ако не е подаден изрично).

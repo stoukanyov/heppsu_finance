@@ -1,7 +1,22 @@
 """Конфигурация на приложението (12-factor, чрез environment / .env)."""
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class InsecureConfigurationError(RuntimeError):
+    """Опасна конфигурация — приложението отказва да стартира (fail-fast)."""
+
+
+# Стойността по подразбиране е удобна за dev, но е публична — в production е забранена.
+DEFAULT_SECRET_KEY = "dev-secret-change-me"
+# Под 32 байта ентропия HS256 ключът е податлив на офлайн brute force.
+MIN_SECRET_KEY_BYTES = 32
+# Среди, в които изискваме „истинска“ конфигурация.
+PRODUCTION_ENVIRONMENTS = frozenset({"production", "prod", "staging"})
+# Подписваме със споделен таен ключ → само симетрични алгоритми. „none“ никога.
+ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
 
 
 class Settings(BaseSettings):
@@ -17,9 +32,19 @@ class Settings(BaseSettings):
     AUTO_CREATE_TABLES: bool = True
 
     # Сигурност / JWT
-    SECRET_KEY: str = "dev-secret-change-me"
+    SECRET_KEY: str = DEFAULT_SECRET_KEY
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 12  # 12 часа
+
+    # ---- Ограничаване на опитите (brute force защита) ----
+    # Плъзгащ прозорец в паметта на процеса. Изключваемо (тестове, отладка).
+    RATE_LIMIT_ENABLED: bool = True
+    LOGIN_RATE_LIMIT_ATTEMPTS: int = 5          # неуспешни опита...
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS: int = 900  # ...в рамките на 15 минути
+    # Зад reverse proxy (Caddy/nginx) реалният клиентски IP идва в X-Forwarded-For.
+    # Включвай САМО ако приложението не е директно достъпно от интернет — иначе
+    # header-ът е подправяем и ограничението се заобикаля тривиално.
+    RATE_LIMIT_TRUST_PROXY_HEADER: bool = False
 
     # Счетоводни настройки по подразбиране за нова компания
     DEFAULT_BASE_CURRENCY: str = "EUR"
@@ -102,6 +127,60 @@ class Settings(BaseSettings):
         if self.AI_PROVIDER == "auto":
             return "anthropic" if self.ANTHROPIC_API_KEY else "stub"
         return self.AI_PROVIDER
+
+    @property
+    def is_production(self) -> bool:
+        """Производствена среда (production/prod/staging) — валидациите са строги."""
+        return self.ENVIRONMENT.strip().lower() in PRODUCTION_ENVIRONMENTS
+
+    # ------------------------------------------------------------------
+    # Fail-fast валидации: изпълняват се при създаване на Settings, тоест при
+    # импортиране на модула — приложението пада на старта, а не при първа заявка.
+    # ------------------------------------------------------------------
+    @model_validator(mode="after")
+    def _validate_security(self) -> "Settings":
+        algorithm = self.JWT_ALGORITHM.strip().upper()
+        if algorithm not in ALLOWED_JWT_ALGORITHMS:
+            raise InsecureConfigurationError(
+                f"Опасна конфигурация: JWT_ALGORITHM='{self.JWT_ALGORITHM}' не е разрешен.\n"
+                f"Позволени са само {sorted(ALLOWED_JWT_ALGORITHMS)} — токените се подписват "
+                "със споделен таен ключ (HMAC).\n"
+                "Стойности като 'none' или асиметрични алгоритми биха позволили приемане на "
+                "неподписани/чужди токени."
+            )
+
+        if not self.is_production:
+            # dev/test: дефолтният ключ е удобен и безопасен (нищо реално не се пази).
+            return self
+
+        problem = _secret_key_problem(self.SECRET_KEY)
+        if problem:
+            raise InsecureConfigurationError(
+                f"Опасна конфигурация: SECRET_KEY {problem} "
+                f"(ENVIRONMENT='{self.ENVIRONMENT}').\n"
+                "Приложението НЕ стартира, защото със знаен ключ всеки може да си подпише "
+                "валиден JWT токен и да влезе като произволен потребител.\n\n"
+                "Генерирай силен ключ:\n"
+                "    openssl rand -hex 32\n\n"
+                "и го подай през средата (.env / docker-compose):\n"
+                "    SECRET_KEY=<генерираният низ>\n\n"
+                "Виж docs/DEPLOY.md, раздел „4. Конфигурация (.env)“."
+            )
+        return self
+
+
+def _secret_key_problem(secret_key: str) -> str | None:
+    """Връща описание на проблема с ключа на български или None, ако е наред."""
+    if not secret_key.strip():
+        return "е празен"
+    if secret_key == DEFAULT_SECRET_KEY:
+        return f"е оставен на стойността по подразбиране ('{DEFAULT_SECRET_KEY}')"
+    if len(secret_key.encode("utf-8")) < MIN_SECRET_KEY_BYTES:
+        return (
+            f"е твърде къс ({len(secret_key.encode('utf-8'))} байта, "
+            f"минимум {MIN_SECRET_KEY_BYTES})"
+        )
+    return None
 
 
 @lru_cache

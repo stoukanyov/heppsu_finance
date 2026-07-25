@@ -31,13 +31,20 @@ def _owner_count(db: Session, company_id: uuid.UUID) -> int:
 
 
 def list_members(db: Session, company_id: uuid.UUID) -> list[dict]:
+    from app.modules.rbac.models import Role
+
     rows = db.execute(
         select(Membership, User).join(User, User.id == Membership.user_id)
         .where(Membership.company_id == company_id)
         .order_by(User.email)
     ).all()
+    role_names = {
+        r.id: r.name
+        for r in db.scalars(select(Role).where(Role.company_id == company_id))
+    }
     return [
-        {"id": m.id, "user_id": u.id, "email": u.email, "full_name": u.full_name, "role": m.role}
+        {"id": m.id, "user_id": u.id, "email": u.email, "full_name": u.full_name,
+         "role": m.role, "role_id": m.role_id, "role_name": role_names.get(m.role_id)}
         for m, u in rows
     ]
 

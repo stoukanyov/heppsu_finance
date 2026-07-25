@@ -27,7 +27,10 @@ class ApiClient {
           }
           // company-scoped заявки: подай активната компания, ако е избрана.
           if (options.extra['requiresCompany'] != false) {
-            final companyId = await _store.readCompanyId();
+            // Изрично подадената компания има предимство — опашката праща
+            // скана към компанията, в която е направен.
+            final companyId = (options.extra['companyId'] as String?) ??
+                await _store.readCompanyId();
             if (companyId != null) {
               options.headers['X-Company-Id'] = companyId;
             }
@@ -53,11 +56,15 @@ class ApiClient {
     String path, {
     Object? data,
     bool requiresCompany = true,
+    String? companyId,
   }) async {
     final res = await _dio.post(
       path,
       data: data,
-      options: Options(extra: {'requiresCompany': requiresCompany}),
+      options: Options(extra: {
+        'requiresCompany': requiresCompany,
+        'companyId': ?companyId,
+      }),
     );
     return _unwrap(res);
   }

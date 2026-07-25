@@ -4,7 +4,7 @@ import uuid
 
 from fastapi import APIRouter, status
 
-from app.api.deps import CurrentCompany, DbSession
+from app.api.deps import CurrentCompany, DbSession, require
 from app.modules.assets import service
 from app.modules.assets.schemas import (
     DepreciateRequest,
@@ -19,27 +19,27 @@ from app.modules.assets.schemas import (
 router = APIRouter(prefix="/fixed-assets", tags=["fixed-assets"])
 
 
-@router.post("", response_model=FixedAssetOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=FixedAssetOut, status_code=status.HTTP_201_CREATED, dependencies=[require("assets.manage")])
 def create_asset(data: FixedAssetCreate, ctx: CurrentCompany, db: DbSession) -> FixedAssetOut:
     return FixedAssetOut.model_validate(service.create_asset(db, ctx.company.id, data))
 
 
-@router.get("", response_model=list[FixedAssetOut])
+@router.get("", response_model=list[FixedAssetOut], dependencies=[require("assets.view")])
 def list_assets(ctx: CurrentCompany, db: DbSession) -> list[FixedAssetOut]:
     return [FixedAssetOut.model_validate(a) for a in service.list_assets(db, ctx.company.id)]
 
 
-@router.get("/{asset_id}", response_model=FixedAssetOut)
+@router.get("/{asset_id}", response_model=FixedAssetOut, dependencies=[require("assets.view")])
 def get_asset(asset_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> FixedAssetOut:
     return FixedAssetOut.model_validate(service.get_asset(db, ctx.company.id, asset_id))
 
 
-@router.get("/{asset_id}/schedule", response_model=list[ScheduleLine])
+@router.get("/{asset_id}/schedule", response_model=list[ScheduleLine], dependencies=[require("assets.view")])
 def get_schedule(asset_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> list[ScheduleLine]:
     return service.schedule(db, ctx.company.id, asset_id)
 
 
-@router.post("/depreciation-run", response_model=list[DepreciationProposal])
+@router.post("/depreciation-run", response_model=list[DepreciationProposal], dependencies=[require("assets.manage")])
 def depreciation_run(
     data: DepreciationRunRequest, ctx: CurrentCompany, db: DbSession
 ) -> list[DepreciationProposal]:
@@ -47,7 +47,7 @@ def depreciation_run(
     return service.depreciation_run(db, ctx.company.id, data.year, data.month)
 
 
-@router.post("/{asset_id}/depreciate", response_model=DepreciationEntryOut, status_code=status.HTTP_201_CREATED)
+@router.post("/{asset_id}/depreciate", response_model=DepreciationEntryOut, status_code=status.HTTP_201_CREATED, dependencies=[require("assets.manage")])
 def depreciate(
     asset_id: uuid.UUID, data: DepreciateRequest, ctx: CurrentCompany, db: DbSession
 ) -> DepreciationEntryOut:
@@ -55,6 +55,6 @@ def depreciate(
     return DepreciationEntryOut.model_validate(depr)
 
 
-@router.post("/{asset_id}/dispose", response_model=FixedAssetOut)
+@router.post("/{asset_id}/dispose", response_model=FixedAssetOut, dependencies=[require("assets.manage")])
 def dispose(asset_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> FixedAssetOut:
     return FixedAssetOut.model_validate(service.dispose(db, ctx.company.id, asset_id, dt.date.today()))

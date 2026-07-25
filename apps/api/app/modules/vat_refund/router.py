@@ -7,7 +7,7 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.api.deps import CurrentCompany, DbSession
+from app.api.deps import CurrentCompany, DbSession, require
 from app.modules.accounting.models import AccountingPeriod
 from app.modules.vat_refund import service
 from app.modules.vat_refund.schemas import (
@@ -49,7 +49,7 @@ def _overview(db, company, proc, with_accelerated: bool = True) -> VatRefundOver
     )
 
 
-@router.post("/evaluate/{period_id}", response_model=VatRefundOverviewOut | None)
+@router.post("/evaluate/{period_id}", response_model=VatRefundOverviewOut | None, dependencies=[require("vat.refund_manage")])
 def evaluate_period(period_id: uuid.UUID, ctx: CurrentCompany, db: DbSession):
     """Проверява дали за периода възниква ДДС за възстановяване и открива процедура."""
     proc = service.evaluate_period(db, ctx.company, ctx.membership.user_id, period_id)
@@ -58,7 +58,7 @@ def evaluate_period(period_id: uuid.UUID, ctx: CurrentCompany, db: DbSession):
     return _overview(db, ctx.company, proc)
 
 
-@router.get("", response_model=list[VatRefundProcedureOut])
+@router.get("", response_model=list[VatRefundProcedureOut], dependencies=[require("vat.view")])
 def list_procedures(ctx: CurrentCompany, db: DbSession) -> list[VatRefundProcedureOut]:
     return [
         VatRefundProcedureOut.model_validate(p)
@@ -66,26 +66,26 @@ def list_procedures(ctx: CurrentCompany, db: DbSession) -> list[VatRefundProcedu
     ]
 
 
-@router.get("/{procedure_id}", response_model=VatRefundOverviewOut)
+@router.get("/{procedure_id}", response_model=VatRefundOverviewOut, dependencies=[require("vat.view")])
 def get_procedure(procedure_id: uuid.UUID, ctx: CurrentCompany, db: DbSession):
     proc = service.get_procedure(db, ctx.company.id, procedure_id)
     return _overview(db, ctx.company, proc)
 
 
-@router.post("/{procedure_id}/validate-credit", response_model=VatRefundOverviewOut)
+@router.post("/{procedure_id}/validate-credit", response_model=VatRefundOverviewOut, dependencies=[require("vat.refund_manage")])
 def validate_credit(procedure_id: uuid.UUID, ctx: CurrentCompany, db: DbSession):
     """Потвърждава правото на данъчен кредит (задължителните проверки)."""
     proc = service.validate_credit(db, ctx.company, ctx.membership.user_id, procedure_id)
     return _overview(db, ctx.company, proc)
 
 
-@router.post("/{procedure_id}/declare-cell-60", response_model=VatRefundOverviewOut)
+@router.post("/{procedure_id}/declare-cell-60", response_model=VatRefundOverviewOut, dependencies=[require("vat.refund_manage")])
 def declare_cell_60(procedure_id: uuid.UUID, ctx: CurrentCompany, db: DbSession):
     proc = service.declare_in_cell_60(db, ctx.company, procedure_id)
     return _overview(db, ctx.company, proc)
 
 
-@router.post("/{procedure_id}/offset/{period_id}", response_model=VatRefundOverviewOut)
+@router.post("/{procedure_id}/offset/{period_id}", response_model=VatRefundOverviewOut, dependencies=[require("vat.refund_manage")])
 def apply_offset(
     procedure_id: uuid.UUID, period_id: uuid.UUID, ctx: CurrentCompany, db: DbSession
 ):
@@ -94,7 +94,7 @@ def apply_offset(
     return _overview(db, ctx.company, proc)
 
 
-@router.get("/{procedure_id}/accelerated-check", response_model=AcceleratedCheckOut)
+@router.get("/{procedure_id}/accelerated-check", response_model=AcceleratedCheckOut, dependencies=[require("vat.view")])
 def accelerated_check(
     procedure_id: uuid.UUID, ctx: CurrentCompany, db: DbSession
 ) -> AcceleratedCheckOut:
@@ -102,7 +102,7 @@ def accelerated_check(
     return service.check_accelerated(db, ctx.company, procedure_id)
 
 
-@router.post("/{procedure_id}/elect-accelerated", response_model=VatRefundOverviewOut)
+@router.post("/{procedure_id}/elect-accelerated", response_model=VatRefundOverviewOut, dependencies=[require("vat.refund_manage")])
 def elect_accelerated(
     procedure_id: uuid.UUID,
     data: AcceleratedElectionIn,
@@ -114,7 +114,7 @@ def elect_accelerated(
     return _overview(db, ctx.company, proc)
 
 
-@router.post("/{procedure_id}/submit", response_model=VatRefundOverviewOut)
+@router.post("/{procedure_id}/submit", response_model=VatRefundOverviewOut, dependencies=[require("vat.refund_manage")])
 def submit(
     procedure_id: uuid.UUID,
     ctx: CurrentCompany,
@@ -126,7 +126,7 @@ def submit(
     return _overview(db, ctx.company, proc)
 
 
-@router.post("/{procedure_id}/nra-check", response_model=VatRefundOverviewOut)
+@router.post("/{procedure_id}/nra-check", response_model=VatRefundOverviewOut, dependencies=[require("vat.refund_manage")])
 def start_nra_check(
     procedure_id: uuid.UUID, ctx: CurrentCompany, db: DbSession, audit: bool = False
 ):
@@ -134,7 +134,7 @@ def start_nra_check(
     return _overview(db, ctx.company, proc)
 
 
-@router.post("/{procedure_id}/decision", response_model=VatRefundOverviewOut)
+@router.post("/{procedure_id}/decision", response_model=VatRefundOverviewOut, dependencies=[require("vat.refund_manage")])
 def record_decision(
     procedure_id: uuid.UUID, data: RefundDecisionIn, ctx: CurrentCompany, db: DbSession
 ):
@@ -142,7 +142,7 @@ def record_decision(
     return _overview(db, ctx.company, proc)
 
 
-@router.post("/{procedure_id}/payment", response_model=VatRefundOverviewOut)
+@router.post("/{procedure_id}/payment", response_model=VatRefundOverviewOut, dependencies=[require("vat.refund_manage")])
 def record_payment(
     procedure_id: uuid.UUID, data: RefundPaymentIn, ctx: CurrentCompany, db: DbSession
 ):

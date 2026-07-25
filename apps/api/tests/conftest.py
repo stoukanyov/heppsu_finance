@@ -18,6 +18,9 @@ os.environ["SECRET_KEY"] = "test-secret-key"
 os.environ["ENVIRONMENT"] = "test"
 os.environ["DOCUMENT_STORAGE_DIR"] = str(_DOCS_DIR)
 os.environ["AI_PROVIDER"] = "stub"  # детерминиран AI, без мрежа
+# Тестовете логват многократно от един и същ „IP“ — ограничението се включва
+# точково само в тестовете, които го проверяват (виж tests/test_rate_limit.py).
+os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 
 @pytest.fixture(scope="session", autouse=True)
