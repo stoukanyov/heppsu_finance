@@ -251,3 +251,35 @@ def test_mobile_scan_uploads_and_ocrs(client):
     dl = client.get(f"{DOC}/{body['document']['id']}/file", headers=h)
     assert dl.status_code == 200
     assert dl.content == b"\xff\xd8\xff\xe0scanbytes"
+
+
+def test_get_extraction_returns_latest(client, monkeypatch):
+    """Клиент, който отваря чужд документ, може да види разпознатото."""
+    from tests.test_ai_posting import _setup, _upload, _extract
+
+    h, _ = _setup(client, "get-extraction@example.com")
+    doc_id = _upload(client, h)
+
+    # преди разпознаване няма нищо
+    empty = client.get(f"{DOC}/{doc_id}/extraction", headers=h)
+    assert empty.status_code == 200, empty.text
+    assert empty.json() is None
+
+    _extract(client, h, doc_id)
+    r = client.get(f"{DOC}/{doc_id}/extraction", headers=h)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["document_id"] == doc_id
+    assert "fields" in body["data"]
+
+
+def test_get_extraction_is_tenant_scoped(client):
+    """Документ на друга компания не се вижда."""
+    from tests.test_ai_posting import _setup, _upload
+
+    h_a, _ = _setup(client, "extraction-owner@example.com")
+    doc_id = _upload(client, h_a)
+
+    h_b, _ = _setup(client, "extraction-stranger@example.com")
+    r = client.get(f"{DOC}/{doc_id}/extraction", headers=h_b)
+    assert r.status_code == 404, r.text

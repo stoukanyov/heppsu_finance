@@ -10,7 +10,10 @@ void main() {
     databaseFactory = databaseFactoryFfi;
   });
 
+  /// `inMemoryDatabasePath` се споделя в рамките на процеса, затова я трием
+  /// преди всяко отваряне — иначе тестовете си виждат данните.
   Future<ScanQueueDb> freshDb() async {
+    await databaseFactoryFfi.deleteDatabase(inMemoryDatabasePath);
     final raw = await databaseFactoryFfi.openDatabase(inMemoryDatabasePath);
     await ScanQueueDb.createSchemaFor(raw);
     return ScanQueueDb(database: raw);

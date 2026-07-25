@@ -3,6 +3,7 @@
 Съзнателно НЯМА endpoint „подай към НАП": системата подготвя пакет, а подаването се
 извършва от потребителя в портала на НАП с КЕП. Разписката се импортира обратно тук.
 """
+import datetime as dt
 import uuid
 from urllib.parse import quote
 
@@ -42,6 +43,71 @@ def list_providers() -> dict:
             "имитиране на кликове не се реализира; електронно подаване ще се добави "
             "като нов провайдър при публикуван официален API."
         ),
+    }
+
+
+@router.get("/export-providers")
+def list_export_providers() -> dict:
+    """Регистрираните експортни формати с версиите им (versioned export providers)."""
+    from app.tax_engine.export.registry import available_export_providers
+
+    return {
+        "providers": [
+            {"code": p.code, "name": p.name, "version": p.version, "media_type": p.media_type}
+            for p in available_export_providers()
+        ],
+        "note": (
+            "Форматите са версионирани: при нова схема на НАП се добавя нов провайдър, "
+            "а старият остава за минали периоди."
+        ),
+    }
+
+
+@router.get("/saft", dependencies=[require("reports.export")])
+def export_saft(
+    ctx: CurrentCompany,
+    db: DbSession,
+    date_from: dt.date,
+    date_to: dt.date,
+    version: str | None = None,
+) -> Response:
+    """SAF-T одитен файл за периода (XML). Само подготвя — не подава."""
+    from app.tax_engine.export.registry import get_export_provider
+
+    provider = get_export_provider("SAFT_BG", version)
+    result = provider.export(
+        ctx.company, {"db": db, "date_from": date_from, "date_to": date_to}
+    )
+    headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(result.filename)}"}
+    if result.warnings:
+        # HTTP header-ите са latin-1: броим предупрежденията тук, а текстовете им се
+        # четат от `GET /submissions/saft/preview`.
+        headers["X-Export-Warnings-Count"] = str(len(result.warnings))
+    return Response(content=result.content, media_type=result.media_type, headers=headers)
+
+
+@router.get("/saft/preview", dependencies=[require("reports.export")])
+def preview_saft(
+    ctx: CurrentCompany,
+    db: DbSession,
+    date_from: dt.date,
+    date_to: dt.date,
+    version: str | None = None,
+) -> dict:
+    """Какво ще съдържа SAF-T файлът и има ли пречки — без да се генерира сваляне."""
+    from app.tax_engine.export.registry import get_export_provider
+
+    provider = get_export_provider("SAFT_BG", version)
+    result = provider.export(
+        ctx.company, {"db": db, "date_from": date_from, "date_to": date_to}
+    )
+    return {
+        "provider": provider.code,
+        "version": provider.version,
+        "filename": result.filename,
+        "size_bytes": len(result.content),
+        "contents": result.contents,
+        "warnings": result.warnings,
     }
 
 

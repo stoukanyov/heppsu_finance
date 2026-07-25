@@ -156,6 +156,24 @@ def get_document(doc_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> Docum
     return DocumentOut.model_validate(service.get_document(db, ctx.company.id, doc_id))
 
 
+@router.get(
+    "/{doc_id}/extraction",
+    response_model=ExtractionOut | None,
+    dependencies=[require("documents.view")],
+)
+def get_extraction(
+    doc_id: uuid.UUID, ctx: CurrentCompany, db: DbSession
+) -> ExtractionOut | None:
+    """Последното разпознаване за документа, или `null`, ако още няма.
+
+    Нужен е на клиентите, които показват документ, без да са го качили те —
+    например мобилното при отваряне на вече съществуващ документ.
+    """
+    doc = service.get_document(db, ctx.company.id, doc_id)  # и проверка за достъп
+    extraction = ai_posting.latest_extraction(db, doc)
+    return None if extraction is None else ExtractionOut.model_validate(extraction)
+
+
 @router.get("/{doc_id}/file", dependencies=[require("documents.view")])
 def download_document(doc_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> Response:
     doc, data = service.get_file(db, ctx.company.id, doc_id)

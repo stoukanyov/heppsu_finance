@@ -8,6 +8,7 @@ import '../../core/queue/upload_queue.dart';
 import '../../core/scan/image_pipeline.dart';
 import '../../domain/models.dart';
 import '../common/widgets.dart';
+import '../documents/edit_extraction_sheet.dart';
 import '../documents/posting_card.dart';
 
 /// Преглед на сканиран документ.
@@ -72,21 +73,21 @@ class _ScanReviewScreenState extends ConsumerState<ScanReviewScreen> {
     try {
       final repo = ref.read(documentsRepositoryProvider);
       // `propose-posting` е идемпотентно — връща вече създадената чернова.
-      final results = await Future.wait([
-        repo.get(documentId),
-        repo.proposePosting(documentId),
-      ]);
+      final document = await repo.get(documentId);
+      final extraction = await repo.extraction(documentId);
+      final posting = await repo.proposePosting(documentId);
       if (!mounted) return;
       setState(() {
         _result = ScanResult(
-          document: results[0] as Document,
-          extraction: const Extraction(
-            id: '',
-            documentId: '',
-            model: '',
-            data: {},
-          ),
-          posting: results[1] as PostingProposal,
+          document: document,
+          extraction: extraction ??
+              const Extraction(
+                id: '',
+                documentId: '',
+                model: '',
+                data: {},
+              ),
+          posting: posting,
         );
       });
     } on ApiException catch (e) {
@@ -355,9 +356,30 @@ class _ResultSectionState extends State<_ResultSection> {
   /// Обновеният документ след осчетоводяване (сменя статуса без ново зареждане).
   Document? _fresh;
 
+  /// Резултатът след ръчна корекция — заменя първоначалния.
+  ScanResult? _corrected;
+
+  /// Пресъздава картата с предложението, защото след корекция то е ново.
+  int _postingRevision = 0;
+
+  Future<void> _edit(BuildContext context, ScanResult current) async {
+    final updated = await showEditExtractionSheet(
+      context,
+      documentId: current.document.id,
+      extraction: current.extraction,
+    );
+    if (updated != null && mounted) {
+      setState(() {
+        _corrected = updated;
+        _fresh = updated.document;
+        _postingRevision++;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final result = widget.result;
+    final result = _corrected ?? widget.result;
     final extraction = result.extraction;
     final fields = extraction.displayFields;
     final confidence = extraction.confidence;
@@ -369,6 +391,12 @@ class _ResultSectionState extends State<_ResultSection> {
         Row(
           children: [
             const Expanded(child: SectionTitle('Разпознати данни')),
+            if (document.status != DocStatus.posted)
+              TextButton.icon(
+                onPressed: () => _edit(context, result),
+                icon: const Icon(Icons.edit_outlined, size: 17),
+                label: const Text('Поправи'),
+              ),
             StatusPill(document.status.label),
           ],
         ),
@@ -419,6 +447,7 @@ class _ResultSectionState extends State<_ResultSection> {
         ),
         const SizedBox(height: 24),
         PostingCard(
+          key: ValueKey(_postingRevision),
           documentId: result.document.id,
           initialProposal: result.posting,
           onPosted: (updated) => setState(() => _fresh = updated),

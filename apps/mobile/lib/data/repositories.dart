@@ -107,6 +107,28 @@ class DocumentsRepository {
     return PostingProposal.fromJson((data as Map).cast<String, dynamic>());
   }
 
+  /// Последното разпознаване, или `null` ако документът още не е обработен.
+  Future<Extraction?> extraction(String docId) async {
+    final data = await _api.get('/documents/$docId/extraction');
+    if (data == null) return null;
+    return Extraction.fromJson((data as Map).cast<String, dynamic>());
+  }
+
+  /// Коригира разпознатите данни и (по подразбиране) иска ново предложение.
+  ///
+  /// Подават се само променените полета — сървърът ги слива върху останалите.
+  Future<ScanResult> correctExtraction(
+    String docId,
+    Map<String, dynamic> fields, {
+    bool recalculate = true,
+  }) async {
+    final data = await _api.patch(
+      '/documents/$docId/extraction',
+      data: {'fields': fields, 'recalculate': recalculate},
+    );
+    return ScanResult.fromJson((data as Map).cast<String, dynamic>());
+  }
+
   /// Потвърждение от потребителя: осчетоводява статията и придвижва документа.
   /// Идемпотентно — повторно натискане връща същата статия.
   Future<({Document document, JournalEntry entry})> confirmPosting(

@@ -137,13 +137,20 @@ class _HomeShellState extends ConsumerState<HomeShell>
           const SizedBox(width: 8),
         ],
       ),
-      body: IndexedStack(
-        index: _index,
-        children: const [
-          DocumentsScreen(),
-          DeadlinesScreen(),
-          VatScreen(),
-          ReportsScreen(),
+      body: Column(
+        children: [
+          if (session.offline) const _OfflineBanner(),
+          Expanded(
+            child: IndexedStack(
+              index: _index,
+              children: const [
+                DocumentsScreen(),
+                DeadlinesScreen(),
+                VatScreen(),
+                ReportsScreen(),
+              ],
+            ),
+          ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -206,6 +213,67 @@ class _HomeShellState extends ConsumerState<HomeShell>
                   ref.invalidate(vatPeriodsProvider);
                   Navigator.pop(context);
                 },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Лента при офлайн вход: обяснява, че данните са кеширани, но сканирането
+/// работи — сканът чака в опашката и тръгва щом има мрежа.
+class _OfflineBanner extends ConsumerStatefulWidget {
+  const _OfflineBanner();
+
+  @override
+  ConsumerState<_OfflineBanner> createState() => _OfflineBannerState();
+}
+
+class _OfflineBannerState extends ConsumerState<_OfflineBanner> {
+  bool _retrying = false;
+
+  Future<void> _retry() async {
+    setState(() => _retrying = true);
+    await ref.read(sessionProvider.notifier).retryOnline();
+    if (mounted) setState(() => _retrying = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFFD97706).withValues(alpha: 0.12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+        child: Row(
+          children: [
+            const Icon(Icons.cloud_off_rounded,
+                size: 18, color: Color(0xFFB45309)),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Офлайн режим — данните са от последното зареждане. '
+                'Сканирането работи и ще се качи автоматично.',
+                style: TextStyle(fontSize: 12.5, color: Color(0xFF92400E)),
+              ),
+            ),
+            if (_retrying)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            else
+              TextButton(
+                onPressed: _retry,
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFB45309),
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: const Text('Опитай'),
               ),
           ],
         ),

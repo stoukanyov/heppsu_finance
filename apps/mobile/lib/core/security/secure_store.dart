@@ -29,9 +29,19 @@ class SecureStore {
   Future<void> setRemindersEnabled(bool enabled) =>
       _storage.write(key: _kReminders, value: enabled ? '1' : '0');
 
+  /// Кеш на профила и компаниите — позволява вход без мрежа, за да работи
+  /// сканирането офлайн. Пази се шифровано, като токена.
+  Future<String?> readSessionCache() => _storage.read(key: _kSessionCache);
+
+  Future<void> writeSessionCache(String json) =>
+      _storage.write(key: _kSessionCache, value: json);
+
+  static const _kSessionCache = 'session_cache';
+
   /// Пълно изчистване при logout (GDPR wipe на локалната сесия).
   Future<void> clear() async {
     await _storage.delete(key: _kToken);
     await _storage.delete(key: _kCompanyId);
+    await _storage.delete(key: _kSessionCache);
   }
 }

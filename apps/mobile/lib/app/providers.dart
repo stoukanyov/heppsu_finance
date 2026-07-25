@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,6 +8,7 @@ import '../core/network/api_exception.dart';
 import '../core/notifications/reminder_service.dart';
 import '../core/queue/scan_queue_db.dart';
 import '../core/queue/upload_queue.dart';
+import '../core/security/jwt.dart';
 import '../core/security/secure_store.dart';
 import '../data/repositories.dart';
 import '../domain/models.dart';
@@ -220,6 +222,7 @@ class SessionState {
     this.companies = const [],
     this.activeCompanyId,
     this.startupError,
+    this.offline = false,
   });
 
   final SessionStage stage;
@@ -230,6 +233,10 @@ class SessionState {
   /// Съобщение, ако възстановяването на сесията при старт се е провалило —
   /// показва се на екрана за вход, за да не изглежда като „грешна парола".
   final String? startupError;
+
+  /// Влезли сме с кеширана сесия, защото сървърът е недостъпен. Сканирането
+  /// работи (опашката поема), но данните на екраните са от последното зареждане.
+  final bool offline;
 
   Company? get activeCompany {
     for (final c in companies) {
@@ -243,12 +250,15 @@ class SessionState {
     AppUser? user,
     List<Company>? companies,
     String? activeCompanyId,
+    bool? offline,
   }) =>
       SessionState(
         stage: stage ?? this.stage,
         user: user ?? this.user,
         companies: companies ?? this.companies,
         activeCompanyId: activeCompanyId ?? this.activeCompanyId,
+        offline: offline ?? this.offline,
+        startupError: startupError,
       );
 }
 
@@ -266,27 +276,79 @@ class SessionController extends StateNotifier<SessionState> {
 
   /// При старт: ако има валиден токен → зареди профил и компании.
   ///
-  /// Никога не оставя приложението на splash: при всяка грешка връща към Login
-  /// с обяснение, вместо да увисне в `loading`.
+  /// Ако сървърът е недостъпен, но токенът още не е изтекъл, влизаме с
+  /// кешираната сесия — иначе сканирането без мрежа е невъзможно, а точно
+  /// тогава е най-нужно. Никога не оставя приложението на splash.
   Future<void> bootstrap() async {
+    final store = _ref.read(secureStoreProvider);
     try {
-      final token = await _ref.read(secureStoreProvider).readToken();
+      final token = await store.readToken();
       if (token == null) {
         state = const SessionState(stage: SessionStage.unauthenticated);
         return;
       }
+      if (isJwtExpired(token)) {
+        // Изтекъл токен няма как да проработи и офлайн — искаме нов вход.
+        await _auth.logout();
+        state = const SessionState(
+          stage: SessionStage.unauthenticated,
+          startupError: 'Сесията изтече. Влез отново.',
+        );
+        return;
+      }
       await _loadAfterAuth();
     } on ApiException catch (e) {
-      // 401 вече е обработен от интерцептора; тук остават 5xx/403 и подобни.
-      state = SessionState(
-        stage: SessionStage.unauthenticated,
-        startupError: e.isUnauthorized ? null : e.message,
-      );
+      if (e.isUnauthorized) {
+        state = const SessionState(stage: SessionStage.unauthenticated);
+        return;
+      }
+      if (!await _enterOffline(e.message)) {
+        state = SessionState(
+          stage: SessionStage.unauthenticated,
+          startupError: e.message,
+        );
+      }
     } catch (_) {
-      state = const SessionState(
-        stage: SessionStage.unauthenticated,
-        startupError: 'Няма връзка със сървъра. Влез отново, когато си онлайн.',
+      if (!await _enterOffline('Няма връзка със сървъра.')) {
+        state = const SessionState(
+          stage: SessionStage.unauthenticated,
+          startupError: 'Няма връзка със сървъра. Влез отново, когато си онлайн.',
+        );
+      }
+    }
+  }
+
+  /// Опитва вход с последно запазените профил и компании. Връща `false`,
+  /// ако няма кеш — тогава наистина няма как да продължим.
+  Future<bool> _enterOffline(String reason) async {
+    final store = _ref.read(secureStoreProvider);
+    final raw = await store.readSessionCache();
+    if (raw == null) return false;
+
+    try {
+      final data = json.decode(raw) as Map<String, dynamic>;
+      final companies = (data['companies'] as List)
+          .map((e) => Company.fromJson((e as Map).cast<String, dynamic>()))
+          .toList();
+      if (companies.isEmpty) return false;
+
+      final saved = await store.readCompanyId();
+      final active =
+          companies.any((c) => c.id == saved) ? saved : companies.first.id;
+
+      state = SessionState(
+        stage: SessionStage.ready,
+        user: data['user'] == null
+            ? null
+            : AppUser.fromJson((data['user'] as Map).cast<String, dynamic>()),
+        companies: companies,
+        activeCompanyId: active,
+        offline: true,
+        startupError: reason,
       );
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -308,12 +370,42 @@ class SessionController extends StateNotifier<SessionState> {
     final active = validSaved ??
         (companies.length == 1 ? companies.first.id : null);
 
+    // Запазваме за офлайн вход при следващ старт без мрежа.
+    await _ref.read(secureStoreProvider).writeSessionCache(json.encode({
+          'user': {
+            'id': user.id,
+            'email': user.email,
+            'full_name': user.fullName,
+          },
+          'companies': [
+            for (final c in companies)
+              {
+                'id': c.id,
+                'name': c.name,
+                'base_currency': c.baseCurrency,
+                'country': c.country,
+                'vat_number': c.vatNumber,
+                'role': c.role,
+              },
+          ],
+        }));
+
     state = SessionState(
       stage: active == null ? SessionStage.needsCompany : SessionStage.ready,
       user: user,
       companies: companies,
       activeCompanyId: active,
     );
+  }
+
+  /// Пробва да се върне онлайн — вика се от банера „офлайн режим".
+  Future<void> retryOnline() async {
+    if (!state.offline) return;
+    try {
+      await _loadAfterAuth();
+    } catch (_) {
+      // Още сме офлайн; състоянието остава каквото е.
+    }
   }
 
   Future<void> selectCompany(String companyId) async {
