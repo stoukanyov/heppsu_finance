@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # auto → anthropic ако има ключ, иначе stub (детерминиран, без мрежа — за dev/тестове).
     AI_PROVIDER: str = "auto"
 
+    # ---- Подаване към НАП ----
+    # Днес е наличен само пакетът за ръчно подаване през портала (с КЕП).
+    # При публикуване на официален API се сменя само тази настройка.
+    NRA_SUBMISSION_PROVIDER: str = "NRA_PORTAL_PACKAGE"
+    NRA_PORTAL_URL: str = "https://portal.nra.bg/"
+
     # ---- Възстановяване на ДДС (чл. 92 ЗДДС) ----
     # Минимален дял доставки с нулева ставка за ускорено възстановяване по ал. 3.
     VAT_ACCELERATED_ZERO_RATE_THRESHOLD: float = 0.30

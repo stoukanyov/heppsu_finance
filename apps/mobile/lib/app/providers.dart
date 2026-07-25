@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/network/api_client.dart';
 import '../core/network/api_exception.dart';
+import '../core/notifications/reminder_service.dart';
 import '../core/security/secure_store.dart';
 import '../data/repositories.dart';
 import '../domain/models.dart';
@@ -37,6 +38,14 @@ final vatRepositoryProvider = Provider<VatRepository>(
 
 final reportsRepositoryProvider = Provider<ReportsRepository>(
   (ref) => ReportsRepository(ref.watch(apiClientProvider)),
+);
+
+final deadlinesRepositoryProvider = Provider<DeadlinesRepository>(
+  (ref) => DeadlinesRepository(ref.watch(apiClientProvider)),
+);
+
+final reminderServiceProvider = Provider<ReminderService>(
+  (ref) => ReminderService(),
 );
 
 // ------------------------------------------------------- данни за екраните
@@ -103,6 +112,58 @@ final storeAnalyticsProvider = FutureProvider.autoDispose<StoreAnalytics>((ref) 
         dateTo: r.toIso,
       );
 });
+
+// ------------------------------------------------------------------ срокове
+
+final deadlinesProvider = FutureProvider<List<Deadline>>((ref) async {
+  final deadlines = await ref.watch(deadlinesRepositoryProvider).upcoming();
+  // При всяко презареждане пренасрочваме напомнянията, за да отразят
+  // променените или отпаднали срокове.
+  if (ref.read(remindersEnabledProvider)) {
+    await ref.read(reminderServiceProvider).reschedule(deadlines);
+  }
+  return deadlines;
+});
+
+/// Дали локалните напомняния са включени (пази се в secure storage).
+final remindersEnabledProvider =
+    StateNotifierProvider<RemindersEnabledController, bool>((ref) {
+  return RemindersEnabledController(ref)..load();
+});
+
+class RemindersEnabledController extends StateNotifier<bool> {
+  RemindersEnabledController(this._ref) : super(false);
+
+  final Ref _ref;
+
+  Future<void> load() async {
+    state = await _ref.read(secureStoreProvider).remindersEnabled();
+  }
+
+  /// Включва/изключва напомнянията. При включване иска разрешение от системата
+  /// и веднага насрочва известията за вече заредените срокове.
+  Future<bool> toggle(bool enabled) async {
+    final service = _ref.read(reminderServiceProvider);
+    if (!enabled) {
+      await service.cancelAll();
+      await _ref.read(secureStoreProvider).setRemindersEnabled(false);
+      state = false;
+      return false;
+    }
+
+    final granted = await service.requestPermission();
+    if (!granted) {
+      state = false;
+      return false;
+    }
+    await _ref.read(secureStoreProvider).setRemindersEnabled(true);
+    state = true;
+
+    final deadlines = _ref.read(deadlinesProvider).valueOrNull;
+    if (deadlines != null) await service.reschedule(deadlines);
+    return true;
+  }
+}
 
 /// Състояние на сесията: зареждане → нужен login → нужен избор на компания → готово.
 enum SessionStage { loading, unauthenticated, needsCompany, ready }

@@ -98,6 +98,11 @@ class Membership(UUIDMixin, TimestampMixin, Base):
     role: Mapped[CompanyRole] = mapped_column(
         SAEnum(CompanyRole, native_enum=False, length=32), nullable=False
     )
+    # Гъвкава роля от RBAC модула. Когато е зададена, тя определя правата; полето
+    # `role` по-горе остава за съвместимост и за бърза ориентация.
+    role_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("roles.id", ondelete="SET NULL"), index=True, nullable=True
+    )
 
     user: Mapped["User"] = relationship(back_populates="memberships")
     company: Mapped["Company"] = relationship(back_populates="memberships")

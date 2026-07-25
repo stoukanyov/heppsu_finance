@@ -12,6 +12,7 @@ class SecureStore {
 
   static const _kToken = 'jwt_access_token';
   static const _kCompanyId = 'active_company_id';
+  static const _kReminders = 'reminders_enabled';
 
   Future<String?> readToken() => _storage.read(key: _kToken);
   Future<void> writeToken(String token) =>
@@ -20,6 +21,13 @@ class SecureStore {
   Future<String?> readCompanyId() => _storage.read(key: _kCompanyId);
   Future<void> writeCompanyId(String id) =>
       _storage.write(key: _kCompanyId, value: id);
+
+  /// Напомнянията за срокове са изключени, докато потребителят не ги включи.
+  Future<bool> remindersEnabled() async =>
+      await _storage.read(key: _kReminders) == '1';
+
+  Future<void> setRemindersEnabled(bool enabled) =>
+      _storage.write(key: _kReminders, value: enabled ? '1' : '0');
 
   /// Пълно изчистване при logout (GDPR wipe на локалната сесия).
   Future<void> clear() async {

@@ -9,6 +9,7 @@ from app.modules.accounting.schemas import JournalEntryOut
 from app.modules.ai import posting as ai_posting
 from app.modules.ai import service as ai_service
 from app.modules.ai.schemas import ExtractionOut, PostingProposalOut
+from app.modules.rbac import service as rbac_service
 from app.modules.documents import service
 from app.modules.documents.models import DocumentSource, DocumentStatus, DocumentType
 from app.modules.documents.schemas import (
@@ -33,7 +34,12 @@ async def scan_document(
 
     В един кръг: създава документ със `source=MOBILE`, пази оригинала (storage_path)
     и връща разпознатите структурирани данни. AI само предлага — не осчетоводява.
+
+    Достъпът изисква роля с разрешен мобилен достъп; иначе се връща 403 с ясно
+    съобщение да се потърси администратор.
     """
+    rbac_service.require_mobile_access(db, ctx.membership)
+    rbac_service.require_permission(db, ctx.membership, "documents.upload")
     content = await file.read()
     doc = service.create_document(
         db,

@@ -173,6 +173,23 @@ class VatRepository {
       );
 }
 
+/// Срокове за подаване/плащане към НАП, НСИ и Търговския регистър.
+class DeadlinesRepository {
+  DeadlinesRepository(this._api);
+
+  final ApiClient _api;
+
+  Future<List<Deadline>> upcoming({int daysAhead = 90}) async {
+    final data = await _api.get(
+      '/deadlines/upcoming',
+      query: {'days_ahead': daysAhead},
+    );
+    return (data as List)
+        .map((e) => Deadline.fromJson((e as Map).cast<String, dynamic>()))
+        .toList();
+  }
+}
+
 /// Отчети: KPI, ОПР и продажби от магазините.
 class ReportsRepository {
   ReportsRepository(this._api);

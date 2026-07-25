@@ -72,19 +72,6 @@ class _VatPeriodTile extends StatelessWidget {
 
   final VatPeriodSummary period;
 
-  Color get _statusColor {
-    switch (period.status) {
-      case VatPeriodStatus.approved:
-        return const Color(0xFF12A150);
-      case VatPeriodStatus.ready:
-        return const Color(0xFFD97706);
-      case VatPeriodStatus.rejected:
-        return const Color(0xFFDC2626);
-      case VatPeriodStatus.open:
-        return const Color(0xFF6366F1);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final payable = period.netPayable;
@@ -110,7 +97,7 @@ class _VatPeriodTile extends StatelessWidget {
                           fontSize: 16, fontWeight: FontWeight.w700),
                     ),
                   ),
-                  StatusPill(period.status.label, color: _statusColor),
+                  StatusPill(period.status.label, color: period.status.color),
                 ],
               ),
               const SizedBox(height: 14),

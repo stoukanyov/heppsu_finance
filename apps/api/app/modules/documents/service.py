@@ -47,8 +47,11 @@ def create_document(
     content_type: str,
     content: bytes,
     source: DocumentSource = DocumentSource.UPLOAD,
+    trusted: bool = False,
 ) -> Document:
-    if content_type not in settings.ALLOWED_CONTENT_TYPES:
+    # `trusted` е за файлове, генерирани от самата система (напр. ZIP пакет за НАП);
+    # качванията от потребители винаги минават през белия списък на типовете.
+    if not trusted and content_type not in settings.ALLOWED_CONTENT_TYPES:
         raise _err(f"Неподдържан тип файл: {content_type}", status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
     size = len(content)
     if size == 0:

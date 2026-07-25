@@ -2,6 +2,8 @@
 /// (`apps/api/app/modules/*`). Без codegen — ръчни `fromJson`.
 library;
 
+import 'dart:ui' show Color;
+
 class Company {
   const Company({
     required this.id,
@@ -263,10 +265,21 @@ class Extraction {
     ('IBAN', ['iban']),
   ];
 
+  /// Полета, които са парични суми — форматират се с два знака.
+  static const _moneyKeys = {
+    'tax_base',
+    'net_amount',
+    'vat_amount',
+    'total',
+    'total_amount',
+  };
+
   List<ExtractedField> get displayFields {
     final f = fields;
     final conf = _fieldConfidence;
+    final currency = (f['currency'] ?? '').toString();
     final out = <ExtractedField>[];
+
     for (final (label, keys) in _display) {
       for (final key in keys) {
         final v = f[key];
@@ -274,13 +287,34 @@ class Extraction {
         out.add(ExtractedField(
           key: key,
           label: label,
-          value: v.toString(),
+          value: _formatValue(key, v, currency),
           confidence: _toDoubleOrNull(conf[key]),
         ));
         break;
       }
     }
     return out;
+  }
+
+  /// Сумите и процентите идват като голи числа (`100.0`) — правим ги четими.
+  static String _formatValue(String key, Object value, String currency) {
+    if (_moneyKeys.contains(key)) {
+      final n = _toDoubleOrNull(value);
+      if (n != null) {
+        final amount = n.toStringAsFixed(2).replaceAll('.', ',');
+        return currency.isEmpty ? amount : '$amount $currency';
+      }
+    }
+    if (key == 'vat_rate') {
+      final n = _toDoubleOrNull(value);
+      if (n != null) {
+        final rate = n == n.roundToDouble()
+            ? n.round().toString()
+            : n.toStringAsFixed(2).replaceAll('.', ',');
+        return '$rate%';
+      }
+    }
+    return value.toString();
   }
 
   factory Extraction.fromJson(Map<String, dynamic> j) => Extraction(
@@ -464,6 +498,21 @@ enum VatPeriodStatus {
         return 'Одобрен';
       case VatPeriodStatus.rejected:
         return 'Отказан';
+    }
+  }
+
+  /// Цветът е част от значението на статуса — държим го тук, за да е еднакъв
+  /// в списъка и в детайла.
+  Color get color {
+    switch (this) {
+      case VatPeriodStatus.open:
+        return const Color(0xFF6366F1);
+      case VatPeriodStatus.ready:
+        return const Color(0xFFD97706);
+      case VatPeriodStatus.approved:
+        return const Color(0xFF12A150);
+      case VatPeriodStatus.rejected:
+        return const Color(0xFFDC2626);
     }
   }
 }
@@ -685,6 +734,67 @@ class StoreAnalytics {
       byMonth: _breakdown(j['by_month']),
     );
   }
+}
+
+// ------------------------------------------------------------------ срокове
+
+/// Срок за подаване/плащане към НАП, НСИ или Търговския регистър.
+class Deadline {
+  const Deadline({
+    required this.key,
+    required this.title,
+    required this.description,
+    required this.dueDate,
+    required this.periodLabel,
+    required this.category,
+    required this.authority,
+    required this.conditional,
+    required this.daysRemaining,
+    required this.movedForHoliday,
+    this.originalDueDate,
+    this.conditionalNote,
+  });
+
+  final String key;
+  final String title;
+  final String description;
+
+  /// **Реалната** дата за подаване — вече преместена напред, ако календарната
+  /// пада в събота, неделя или официален празник. Всички напомняния се броят
+  /// от нея, не от календарната.
+  final DateTime dueDate;
+
+  /// Календарната дата преди преместването — само за показване.
+  final DateTime? originalDueDate;
+
+  final String periodLabel;
+  final String category;
+  final String authority;
+  final bool conditional;
+  final int daysRemaining;
+  final bool movedForHoliday;
+  final String? conditionalNote;
+
+  bool get isOverdue => daysRemaining < 0;
+  bool get isUrgent => daysRemaining >= 0 && daysRemaining <= 3;
+  bool get isSoon => daysRemaining > 3 && daysRemaining <= 7;
+
+  factory Deadline.fromJson(Map<String, dynamic> j) => Deadline(
+        key: (j['key'] ?? '') as String,
+        title: (j['title'] ?? '') as String,
+        description: (j['description'] ?? '') as String,
+        dueDate: DateTime.parse(j['due_date'] as String),
+        originalDueDate: j['original_due_date'] == null
+            ? null
+            : DateTime.parse(j['original_due_date'] as String),
+        periodLabel: (j['period_label'] ?? '') as String,
+        category: (j['category'] ?? '') as String,
+        authority: (j['authority'] ?? 'НАП') as String,
+        conditional: (j['conditional'] ?? false) as bool,
+        daysRemaining: (j['days_remaining'] ?? 0) as int,
+        movedForHoliday: (j['moved_for_holiday'] ?? false) as bool,
+        conditionalNote: j['conditional_note'] as String?,
+      );
 }
 
 /// Толерантен парсър — backend праща Decimal като string в JSON.

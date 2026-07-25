@@ -156,7 +156,7 @@ class _VatPeriodDetailScreenState extends ConsumerState<VatPeriodDetailScreen> {
                           ),
                         ),
                       ),
-                      StatusPill(_status.label),
+                      StatusPill(_status.label, color: _status.color),
                     ],
                   ),
                   if (_status == VatPeriodStatus.rejected &&

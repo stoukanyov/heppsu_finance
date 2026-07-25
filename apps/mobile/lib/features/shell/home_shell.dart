@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../deadlines/deadlines_screen.dart';
 import '../documents/documents_screen.dart';
 import '../reports/reports_screen.dart';
 import '../scanner/scanner_flow.dart';
@@ -18,7 +19,7 @@ class HomeShell extends ConsumerStatefulWidget {
 class _HomeShellState extends ConsumerState<HomeShell> {
   int _index = 0;
 
-  static const _titles = ['Документи', 'ДДС', 'Отчети'];
+  static const _titles = ['Документи', 'Срокове', 'ДДС', 'Отчети'];
 
   @override
   Widget build(BuildContext context) {
@@ -86,6 +87,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         index: _index,
         children: const [
           DocumentsScreen(),
+          DeadlinesScreen(),
           VatScreen(),
           ReportsScreen(),
         ],
@@ -103,6 +105,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             icon: Icon(Icons.receipt_long_outlined),
             selectedIcon: Icon(Icons.receipt_long_rounded),
             label: 'Документи',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.event_outlined),
+            selectedIcon: Icon(Icons.event_rounded),
+            label: 'Срокове',
           ),
           NavigationDestination(
             icon: Icon(Icons.request_quote_outlined),

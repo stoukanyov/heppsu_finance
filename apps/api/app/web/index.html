@@ -744,12 +744,14 @@ async function viewVat(main){
     <div class="steps"><div class="step done"><span class="n">1</span>Данни</div><div class="step-sep"></div><div class="step active"><span class="n">2</span>Проверка</div><div class="step-sep"></div><div class="step"><span class="n">3</span>Декларация</div><div class="step-sep"></div><div class="step"><span class="n">4</span>Подписване</div><div class="step-sep"></div><div class="step"><span class="n">5</span>Подаване</div></div>
     <div class="toolbar"><div class="field" style="margin:0;min-width:180px;"><label>Данъчен период</label><select id="v-period">${periods.map(p=>`<option value="${p.id}">${esc(p.code)}</option>`).join('')}</select></div>
       <button id="v-load" class="primary" style="align-self:flex-end;">Изчисли декларация</button>
-      <button id="v-nap" style="align-self:flex-end;">${ic('download')}Файлове за НАП (.zip)</button>
+      <button id="v-prep" style="align-self:flex-end;">${ic('doc')}Подготви пакет за НАП</button>
+      <button id="v-nap" style="align-self:flex-end;">${ic('download')}Експортирай файловете (.zip)</button>
       <button id="v-close" style="align-self:flex-end;border-color:var(--good);color:var(--good);">${ic('check')}Приключи ДДС период</button></div>
     <div id="v-result">${loading()}</div>`;
   const load=()=>loadVatDeclaration(document.getElementById('v-period').value);
   document.getElementById('v-load').onclick=load; document.getElementById('v-period').onchange=load;
   document.getElementById('v-nap').onclick=()=>{ const s=document.getElementById('v-period'); blobDownload(`/vat/returns/${s.value}/nap-files`,`NAP-DDS-${s.selectedOptions[0].text.replace('-','')}.zip`); };
+  document.getElementById('v-prep').onclick=()=>prepareNapPackage(document.getElementById('v-period').value);
   document.getElementById('v-close').onclick=async()=>{
     const s=document.getElementById('v-period');
     if(!confirm(`Приключване на ДДС период ${s.selectedOptions[0].text}? Ще се осчетоводи резултатът и периодът се заключва за ДДС.`)) return;
@@ -777,6 +779,82 @@ async function loadVatDeclaration(pid){
         <table><thead><tr><th>Клетка</th><th>Описание</th><th class="num">Стойност</th></tr></thead><tbody>${d.cells.map(c=>`<tr><td class="strong">${esc(c.cell)}</td><td>${esc(c.label)}</td><td class="num">${fmt(c.amount)}</td></tr>`).join('')}</tbody></table>
         <div class="hint" style="margin-top:10px;">Пакетът за НАП: POKUPKI.TXT, PRODAGBI.TXT, DEKLAR.TXT (+ VIES.TXT при ВОД), кодиране Windows-1251.</div></div>`;
   }catch(e){ box.innerHTML=`<div class="card">${empty(e.message)}</div>`; }
+}
+
+/* ==================== ПОДГОТОВКА НА ПАКЕТ ЗА НАП ==================== */
+async function prepareNapPackage(periodId){
+  const box=document.getElementById('v-result'); if(!box) return;
+  const wrap=document.createElement('div'); wrap.id='nap-prep'; wrap.innerHTML=loading();
+  document.getElementById('nap-prep')?.remove(); box.prepend(wrap);
+  try{
+    const pv=await api(`/submissions/vat/${periodId}/preview`);
+    const errs=pv.controls.filter(c=>c.level==='ERROR'), warns=pv.controls.filter(c=>c.level!=='ERROR');
+    wrap.innerHTML=`<div class="card" style="margin-bottom:16px;border-color:var(--accent);">
+      <div class="card-t"><h3>Финален преглед преди подаване · ${esc(pv.period_code)}</h3>
+        <div class="flex">${errs.length?'<span class="pill s-red">Има грешки</span>':'<span class="pill s-green">Готово за подготовка</span>'}
+        <span class="pill s-gray na">${esc(pv.provider_name)}</span></div></div>
+      <div class="cols" style="gap:14px;">
+        <div><h4 class="muted" style="margin-bottom:8px;">Пакетът ще съдържа</h4>
+          <ul class="check">${pv.package_contents.map(c=>`<li>${ic('check')}<span>${esc(c)}</span></li>`).join('')}</ul></div>
+        <div><h4 class="muted" style="margin-bottom:8px;">Ключови стойности</h4>
+          <table><tbody>
+            <tr><td class="muted">Клетка 20 (начислен ДДС)</td><td class="num strong">${fmt(pv.summary.cell_20)}</td></tr>
+            <tr><td class="muted">Клетка 40 (данъчен кредит)</td><td class="num strong">${fmt(pv.summary.cell_40)}</td></tr>
+            <tr><td class="muted">Клетка 50 (за внасяне)</td><td class="num strong">${fmt(pv.summary.cell_50)}</td></tr>
+            <tr><td class="muted">Клетка 60 (за възстановяване)</td><td class="num strong">${fmt(pv.summary.cell_60)}</td></tr>
+            <tr><td class="muted">Срок за подаване</td><td class="strong">${esc(pv.submission_deadline||'—')}</td></tr>
+          </tbody></table></div></div>
+      ${errs.length?`<ul class="check" style="margin-top:10px;">${errs.map(c=>`<li style="color:var(--bad)">${ic('alert')}<span style="color:var(--ink-2)">${esc(c.message)}</span></li>`).join('')}</ul>`:''}
+      ${warns.length?`<ul class="check" style="margin-top:6px;">${warns.map(c=>`<li style="color:var(--warn)">${ic('alert')}<span style="color:var(--ink-2)">${esc(c.message)}</span></li>`).join('')}</ul>`:''}
+      <div class="hint" style="margin-top:10px;">Подаването се извършва от вас в портала на НАП с КЕП — системата само подготвя пакета.</div>
+      <div class="flex" style="margin-top:12px;">
+        <button id="nap-do" class="primary" ${errs.length?'disabled':''}>${ic('doc')}Подготви пакет за НАП</button>
+        <button class="ghost" onclick="document.getElementById('nap-prep').remove()">Затвори</button></div>
+      <div id="nap-done"></div></div>`;
+    const btn=document.getElementById('nap-do');
+    if(btn) btn.onclick=async()=>{
+      btn.disabled=true; btn.textContent='Подготвя…';
+      try{ const sub=await api(`/submissions/vat/${periodId}/prepare`,{method:'POST'});
+        toast('Пакетът е подготвен'); showSubmission(sub, pv);
+      }catch(e){ toast(e.message,true); btn.disabled=false; btn.textContent='Подготви пакет за НАП'; } };
+  }catch(e){ wrap.innerHTML=`<div class="card" style="margin-bottom:16px;">${empty(e.message)}</div>`; }
+}
+function showSubmission(sub, pv){
+  const box=document.getElementById('nap-done'); if(!box) return;
+  box.innerHTML=`<div class="card" style="margin-top:14px;background:var(--good-soft);border-color:var(--good);">
+      <div class="card-t"><div class="flex">${ic('check')}<b style="color:#15803d;">Пакетът е готов: ${esc(sub.package_filename)}</b></div>
+        <span class="pill s-green na">${Math.round(sub.package_size/1024)} KB</span></div>
+      <ol style="margin:0 0 10px 18px;padding:0;color:var(--ink-2);font-size:13.5px;">
+        <li>Експортирай файловете и отвори портала на НАП.</li>
+        <li>Качи ги за период ${esc(sub.period_code)} и подпиши с КЕП.</li>
+        <li>Свали разписката и я импортирай тук.</li></ol>
+      <div class="flex" style="flex-wrap:wrap;">
+        <button class="primary" id="sub-dl">${ic('download')}Експортирай за подаване</button>
+        <button id="sub-portal">${ic('globe')}Отвори портала на НАП</button>
+        <button id="sub-receipt">${ic('doc')}Импортирай разписка</button></div>
+      <div class="hint" style="margin-top:8px;">SHA-256: ${esc(sub.package_sha256.slice(0,24))}… · срок ${esc(sub.submission_deadline||'—')}</div>
+      <div id="sub-receipt-form"></div></div>`;
+  document.getElementById('sub-dl').onclick=()=>blobDownload(`/submissions/${sub.id}/package`, sub.package_filename);
+  document.getElementById('sub-portal').onclick=()=>window.open((pv&&pv.portal_url)||'https://portal.nra.bg/','_blank','noopener');
+  document.getElementById('sub-receipt').onclick=()=>{
+    document.getElementById('sub-receipt-form').innerHTML=`<div class="card" style="margin-top:12px;">
+      <h4 style="margin-bottom:10px;">Импортирай разписка от НАП</h4>
+      <div class="row"><div class="field grow"><label>Файл (PDF)</label><input id="rc-file" type="file" accept="application/pdf,image/*"/></div>
+        <div class="field"><label>Входящ №</label><input id="rc-num"/></div>
+        <div class="field"><label>Дата</label><input id="rc-date" type="date"/></div>
+        <div class="field"><label>Резултат</label><select id="rc-ok"><option value="true">Приета</option><option value="false">Отхвърлена</option></select></div>
+        <button id="rc-save" class="primary">Запази</button></div></div>`;
+    document.getElementById('rc-save').onclick=async()=>{
+      const f=document.getElementById('rc-file').files[0]; if(!f){ toast('Избери файл',true); return; }
+      const fd=new FormData(); fd.append('file',f);
+      const n=document.getElementById('rc-num').value; if(n) fd.append('receipt_number',n);
+      const d=document.getElementById('rc-date').value; if(d) fd.append('receipt_date',d);
+      fd.append('accepted',document.getElementById('rc-ok').value);
+      try{ const s=await api(`/submissions/${sub.id}/receipt`,{method:'POST',form:fd});
+        toast(`Разписката е запазена · ${s.status==='ACCEPTED'?'приета':'отхвърлена'}`);
+        document.getElementById('sub-receipt-form').innerHTML=`<div class="card" style="margin-top:12px;"><span class="badge-ok">✓ Разписка ${esc(s.receipt_number||'')} от ${esc(s.receipt_date||'')} — статус ${esc(s.status)}</span></div>`;
+      }catch(e){ toast(e.message,true); } };
+  };
 }
 
 /* ==================== ДДС ВЪЗСТАНОВЯВАНЕ (чл. 92 ЗДДС) ==================== */
