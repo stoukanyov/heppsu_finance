@@ -4,17 +4,15 @@
 компанията. Единственото четене от базата е проверката дали за даден месец има
 вътреобщностни доставки (за VIES декларацията).
 
-ПЕРСИСТЕНЦИЯ (нарочно НЕ е реализирана сега): ако потрябва „отметнато като подадено“,
-най-чистото място е нова таблица `deadline_acknowledgements` (company_id, key,
-acknowledged_at, user_id) в отделен `models.py` на този модул. Тогава
-``upcoming_deadlines`` прави един ``select`` по (company_id, key IN [...]) и обогатява
-DeadlineOut с поле ``acknowledged``. Полето ``key`` е проектирано точно за това — то е
-стабилно между извикванията.
+Единственото собствено състояние е таблицата `deadline_filings` — отметките
+„подадено“. Календарът не може да ги изведе; всичко останало се изчислява.
+``upcoming_deadlines`` ги чете с една заявка и обогатява ``DeadlineOut``.
 """
 from __future__ import annotations
 
 import calendar
 import datetime as dt
+import uuid
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -22,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.companies.models import Company
 from app.modules.deadlines.holidays import next_working_day
+from app.modules.deadlines.models import DeadlineFiling
 from app.modules.deadlines.schemas import (
     AUTHORITY_NAP,
     AUTHORITY_NSI,
@@ -347,11 +346,17 @@ def upcoming_deadlines(
     *,
     reference_date: dt.date | None = None,
     days_ahead: int = DEFAULT_DAYS_AHEAD,
+    include_filed: bool = True,
 ) -> list[DeadlineOut]:
     """Предстоящите срокове в прозореца [reference_date, reference_date + days_ahead].
 
     Резултатът е сортиран по крайна дата възходящо (при равни дати — по ключ, за да е
     подредбата детерминирана).
+
+    Отметнатите като подадени се връщат с ``filed=True``, а не се скриват:
+    човек трябва да може да види какво вече е подал и да отмени грешна отметка.
+    ``include_filed=False`` ги изключва — така мобилният клиент насрочва
+    напомняния само за това, което още предстои.
     """
     today = reference_date or dt.date.today()
     days_ahead = max(1, min(days_ahead, MAX_DAYS_AHEAD))
@@ -375,6 +380,15 @@ def upcoming_deadlines(
     for year in range(gen_from.year, gen_to.year + 1):
         candidates.extend(_annual_candidates(year))
 
+    # Една заявка за всички отметки на компанията — броят им е малък (по един
+    # ред на подаден срок), затова не филтрираме по ключове.
+    filings = {
+        f.key: f.filed_at
+        for f in db.scalars(
+            select(DeadlineFiling).where(DeadlineFiling.company_id == company.id)
+        )
+    }
+
     result: list[DeadlineOut] = []
     seen_keys: set[str] = set()
     for candidate in candidates:
@@ -382,6 +396,9 @@ def upcoming_deadlines(
         if not (today <= due_date <= window_end):
             continue
         if candidate.key in seen_keys:  # предпазна мярка срещу дублиране на ключове
+            continue
+        filed_at = filings.get(candidate.key)
+        if filed_at is not None and not include_filed:
             continue
         seen_keys.add(candidate.key)
         result.append(
@@ -398,7 +415,72 @@ def upcoming_deadlines(
                 conditional=candidate.conditional,
                 conditional_note=candidate.conditional_note,
                 days_remaining=(due_date - today).days,
+                filed=filed_at is not None,
+                filed_at=filed_at,
             )
         )
     result.sort(key=lambda d: (d.due_date, d.key))
     return result
+
+
+# --------------------------------------------------------- отметки „подадено“
+
+
+def mark_filed(
+    db: Session,
+    company_id: uuid.UUID,
+    user_id: uuid.UUID,
+    key: str,
+    note: str | None = None,
+) -> DeadlineFiling:
+    """Отмята срок като подаден. Повторното извикване обновява бележката.
+
+    Идемпотентно нарочно: две натискания от два телефона не бива да дават
+    грешка — резултатът е един и същ.
+    """
+    existing = db.scalar(
+        select(DeadlineFiling).where(
+            DeadlineFiling.company_id == company_id, DeadlineFiling.key == key
+        )
+    )
+    if existing is not None:
+        if note is not None:
+            existing.note = note
+        db.commit()
+        db.refresh(existing)
+        return existing
+
+    filing = DeadlineFiling(
+        company_id=company_id,
+        key=key,
+        filed_at=dt.datetime.now(dt.UTC),
+        filed_by_id=user_id,
+        note=note,
+    )
+    db.add(filing)
+    db.commit()
+    db.refresh(filing)
+    return filing
+
+
+def unmark_filed(db: Session, company_id: uuid.UUID, key: str) -> None:
+    """Маха отметката. Липсваща отметка не е грешка — резултатът е същият."""
+    filing = db.scalar(
+        select(DeadlineFiling).where(
+            DeadlineFiling.company_id == company_id, DeadlineFiling.key == key
+        )
+    )
+    if filing is None:
+        return
+    db.delete(filing)
+    db.commit()
+
+
+def list_filings(db: Session, company_id: uuid.UUID) -> list[DeadlineFiling]:
+    return list(
+        db.scalars(
+            select(DeadlineFiling)
+            .where(DeadlineFiling.company_id == company_id)
+            .order_by(DeadlineFiling.filed_at.desc())
+        )
+    )

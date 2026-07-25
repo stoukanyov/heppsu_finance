@@ -38,13 +38,12 @@ class Settings(BaseSettings):
     SECRET_KEY: str = DEFAULT_SECRET_KEY
     JWT_ALGORITHM: str = "HS256"
     # Access токенът е самодостатъчен (JWT) и НЕ може да бъде отменен, докато не изтече —
-    # затова правилната стойност е кратка (виж RECOMMENDED_ACCESS_TOKEN_MINUTES).
+    # затова стойността е кратка. И двата клиента вече ротират: мобилният през
+    # `ApiClient`, уебът през `ensureFreshToken` в `app/web/index.html`.
     #
-    # Подразбиращата се стойност обаче остава 12 часа, защото вграденото уеб приложение
-    # (`app/web/index.html`) още няма refresh логика: то пази токена в localStorage и
-    # никога не вика `POST /auth/refresh`. С 15 минути потребителят му би въвеждал парола
-    # четири пъти на час. Свали я на 15 в `.env` веднага щом уебът почне да ротира.
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 12  # 12 часа (безопасно за уеба; виж по-горе)
+    # Практическата разлика: при компрометиран токен прозорецът е 15 минути вместо
+    # 12 часа, а отмяната на refresh токена (изход, кражба) става веднага.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = RECOMMENDED_ACCESS_TOKEN_MINUTES
 
     # ---- Refresh токени (ротация с откриване на преизползване) ----
     # Непрозрачен случаен низ, пазен в базата само като SHA-256 хеш. Дълъг живот, но
@@ -130,6 +129,24 @@ class Settings(BaseSettings):
         has_apple = bool(self.APPLE_ISSUER_ID and self.APPLE_KEY_ID and self.APPLE_PRIVATE_KEY_PATH)
         has_google = bool(self.GOOGLE_PLAY_BUCKET and self.GOOGLE_APPLICATION_CREDENTIALS)
         return "live" if (has_apple or has_google) else "stub"
+
+    # ---- Мобилен клиент ----
+    # Версията, под която приложението спира да работи. Проверката е на сървъра,
+    # за да може да се вдигне без ново издание в магазина — това е единственият
+    # начин да се извади от употреба клиент с намерен пробив в сигурността.
+    # Празно/„0.0.0“ = нищо не се блокира.
+    MOBILE_MIN_SUPPORTED_VERSION: str = "0.0.0"
+    # Последната публикувана версия — по-старите виждат ненатрапчива покана.
+    MOBILE_LATEST_VERSION: str = ""
+    MOBILE_IOS_STORE_URL: str = ""
+    MOBILE_ANDROID_STORE_URL: str = ""
+    # Обяснение, което се показва при блокиране (напр. „поправка в изчисляването на ДДС“).
+    MOBILE_UPDATE_MESSAGE: str = ""
+
+    # Приемане на отчети за сривове от мобилния клиент.
+    CRASH_REPORTING_ENABLED: bool = True
+    CRASH_REPORT_RATE_LIMIT: int = 20            # доклада...
+    CRASH_REPORT_RATE_WINDOW_SECONDS: int = 3600  # ...на час от един IP
 
     # Съхранение на документи
     DOCUMENT_STORAGE_DIR: str = "./storage/documents"

@@ -1,7 +1,7 @@
 """payroll (ТРЗ: служители, договори, осигурителни параметри, ведомости)
 
 Revision ID: c3f8e5a41d92
-Revises: f7a2c1d84b60
+Revises: d5b8e3a91c47
 Create Date: 2026-07-25 16:30:00.000000
 """
 from typing import Sequence, Union
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision: str = 'c3f8e5a41d92'
-down_revision: Union[str, None] = 'f7a2c1d84b60'
+down_revision: Union[str, None] = 'd5b8e3a91c47'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

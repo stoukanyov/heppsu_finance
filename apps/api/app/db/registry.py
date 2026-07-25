@@ -12,10 +12,12 @@ from app.modules.audit import models as audit_models  # noqa: F401
 from app.modules.banking import models as banking_models  # noqa: F401
 from app.modules.companies import models as companies_models  # noqa: F401
 from app.modules.counterparties import models as counterparties_models  # noqa: F401
+from app.modules.deadlines import models as deadlines_models  # noqa: F401
 from app.modules.documents import models as documents_models  # noqa: F401
 from app.modules.firm import models as firm_models  # noqa: F401
 from app.modules.identity import models as identity_models  # noqa: F401
 from app.modules.invoicing import models as invoicing_models  # noqa: F401
+from app.modules.mobile import models as mobile_models  # noqa: F401
 from app.modules.payments import models as payments_models  # noqa: F401
 from app.modules.payroll import models as payroll_models  # noqa: F401
 from app.modules.purchases import models as purchases_models  # noqa: F401

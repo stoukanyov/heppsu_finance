@@ -15,7 +15,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Приложението НЕ се върти като root. UID 1001 съвпада с потребителя `deploy` на
+# хоста, за да може да пише в монтираната /app/storage.
+RUN groupadd -g 1001 app \
+    && useradd -u 1001 -g 1001 -m -s /usr/sbin/nologin app \
+    && mkdir -p /app/storage \
+    && chown -R app:app /app/storage
+USER app
+
 EXPOSE 8000
 
-# Production: sваля reload; за реален трафик добави --workers според ядрата.
+# Production: без reload. Броят работници се задава от compose според ядрата.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -286,3 +286,87 @@ def test_requires_company_context(client):
     r = client.get(DL, headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 400
     assert client.get(DL).status_code == 401  # без токен
+
+
+# ============================ отметки „подадено“ ============================
+
+FILINGS = "/api/v1/deadlines/filings"
+
+
+def _first_key(client, headers) -> str:
+    return _get(client, headers, "2026-07-01")[0]["key"]
+
+
+def test_marking_a_deadline_filed_shows_in_the_list(client):
+    headers = _setup(client, "filed-1@example.com")
+    key = _first_key(client, headers)
+
+    r = client.post(FILINGS, headers=headers, json={"key": key, "note": "подадено през портала"})
+    assert r.status_code == 201, r.text
+
+    marked = _by_key(_get(client, headers, "2026-07-01"))[key]
+    assert marked["filed"] is True
+    assert marked["filed_at"] is not None
+
+
+def test_filed_deadlines_are_not_hidden_by_default(client):
+    """Човек трябва да вижда какво вече е подал — и да може да отмени грешка."""
+    headers = _setup(client, "filed-2@example.com")
+    key = _first_key(client, headers)
+    client.post(FILINGS, headers=headers, json={"key": key})
+
+    assert key in _by_key(_get(client, headers, "2026-07-01"))
+
+
+def test_include_filed_false_leaves_only_what_is_pending(client):
+    """Мобилният клиент насрочва напомняния само за непубликуваното."""
+    headers = _setup(client, "filed-3@example.com")
+    key = _first_key(client, headers)
+    client.post(FILINGS, headers=headers, json={"key": key})
+
+    r = client.get(
+        DL,
+        headers=headers,
+        params={"reference_date": "2026-07-01", "days_ahead": 60, "include_filed": False},
+    )
+    assert key not in _by_key(r.json())
+
+
+def test_marking_twice_is_not_an_error(client):
+    """Две натискания от два телефона дават един и същ резултат."""
+    headers = _setup(client, "filed-4@example.com")
+    key = _first_key(client, headers)
+
+    assert client.post(FILINGS, headers=headers, json={"key": key}).status_code == 201
+    r = client.post(FILINGS, headers=headers, json={"key": key, "note": "второ"})
+    assert r.status_code == 201
+    assert r.json()["note"] == "второ"
+
+    assert len(client.get(FILINGS, headers=headers).json()) == 1
+
+
+def test_unmarking_restores_the_deadline(client):
+    headers = _setup(client, "filed-5@example.com")
+    key = _first_key(client, headers)
+    client.post(FILINGS, headers=headers, json={"key": key})
+
+    r = client.delete(FILINGS, headers=headers, params={"key": key})
+    assert r.status_code == 204
+
+    assert _by_key(_get(client, headers, "2026-07-01"))[key]["filed"] is False
+
+
+def test_unmarking_something_never_marked_is_not_an_error(client):
+    headers = _setup(client, "filed-6@example.com")
+    r = client.delete(FILINGS, headers=headers, params={"key": "vat-return:2020-01"})
+    assert r.status_code == 204
+
+
+def test_filings_do_not_leak_between_companies(client):
+    """Отметката е на компанията, не на потребителя."""
+    headers_a = _setup(client, "filed-7@example.com")
+    key = _first_key(client, headers_a)
+    client.post(FILINGS, headers=headers_a, json={"key": key})
+
+    headers_b = _setup(client, "filed-8@example.com")
+    assert _by_key(_get(client, headers_b, "2026-07-01"))[key]["filed"] is False

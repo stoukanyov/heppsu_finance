@@ -27,3 +27,6 @@ dist/
 
 # Claude Code: споделяме settings.json, но не машинно-локалните настройки
 .claude/settings.local.json
+
+# Временни папки на pytest (tmp_path_factory), ако TMPDIR сочи в репото.
+apps/api/.pytest-tmp/
