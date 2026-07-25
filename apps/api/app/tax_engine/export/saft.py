@@ -13,7 +13,6 @@ SAF-T е XML файл с одитна извадка от счетоводств
 from __future__ import annotations
 
 import datetime as dt
-import uuid
 import xml.etree.ElementTree as ET
 from decimal import Decimal
 

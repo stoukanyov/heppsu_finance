@@ -231,16 +231,26 @@ def import_mt940(db: Session, company: Company, account_id: uuid.UUID, content: 
 
 
 def _parse_camt(content: bytes) -> list[BankTransactionIn]:
+    """Разчита CAMT.053 извлечение.
+
+    Файлът идва от потребител, затова се парсва с `defusedxml`: стандартният
+    `xml.etree.ElementTree` е уязвим на entity expansion („billion laughs") и един
+    малък файл може да изяде паметта на процеса.
+    """
     import datetime as dt
     import xml.etree.ElementTree as ET
+
+    from defusedxml.ElementTree import fromstring as safe_fromstring
 
     def local(elem) -> str:
         return elem.tag.split("}")[-1]
 
     try:
-        root = ET.fromstring(content)
+        root = safe_fromstring(content)
     except ET.ParseError as exc:
         raise _err(f"Невалиден CAMT XML: {exc}")
+    except Exception as exc:                       # DTD/entity — отказваме файла
+        raise _err(f"Отказан CAMT XML: {exc}")
 
     items: list[BankTransactionIn] = []
     for ntry in (e for e in root.iter() if local(e) == "Ntry"):

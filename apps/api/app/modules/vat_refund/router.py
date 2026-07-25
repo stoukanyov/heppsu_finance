@@ -5,7 +5,7 @@
 import datetime as dt
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 
 from app.api.deps import CurrentCompany, DbSession, require
 from app.modules.accounting.models import AccountingPeriod

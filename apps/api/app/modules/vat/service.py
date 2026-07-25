@@ -32,7 +32,6 @@ from app.modules.vat.schemas import (
     VatControl,
     VatDeclarationOut,
     VatEntryCreate,
-    VatPeriodClosingOut,
     VatPeriodRejectIn,
     VatPeriodSummaryOut,
     VatReturnOut,

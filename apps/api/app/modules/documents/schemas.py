@@ -63,13 +63,6 @@ class ScanResultOut(BaseModel):
 
 
 class PostingConfirmOut(BaseModel):
-    """Резултат от потвърждаване: осчетоводената статия и придвижения документ."""
-
-    document: DocumentOut
-    entry: JournalEntryOut
-
-
-class PostingConfirmOut(BaseModel):
     """Резултат от човешкото потвърждение: осчетоводената статия и документът."""
 
     document: DocumentOut

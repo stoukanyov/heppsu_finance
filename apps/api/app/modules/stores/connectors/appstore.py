@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import gzip
 import io
 import time
@@ -69,14 +70,18 @@ class AppStoreConnector(StoreConnector):
             return []
         header = lines[0].split("\t")
         col = {name: i for i, name in enumerate(header)}
+
+        def field(fields: list[str], name: str, default: str = "") -> str:
+            """Колона по име; липсващите колони не чупят реда."""
+            i = col.get(name)
+            return fields[i] if i is not None and i < len(fields) else default
+
         rows: list[StoreSaleData] = []
         for line in lines[1:]:
             f = line.split("\t")
             if len(f) < len(header):
                 continue
-
-            def g(name, default=""):
-                return f[col[name]] if name in col and col[name] < len(f) else default
+            g = functools.partial(field, f)
 
             try:
                 units = int(g("Units", "0") or 0)

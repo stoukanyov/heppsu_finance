@@ -11,6 +11,7 @@ python-multipart==0.0.32
 psycopg[binary]==3.3.4
 anthropic==0.120.0
 fpdf2==2.8.7
+defusedxml==0.7.1        # безопасно парсване на качени XML файлове (CAMT извлечения)
 
 # dev / test
 pytest==9.1.1

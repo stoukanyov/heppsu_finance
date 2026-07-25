@@ -58,6 +58,22 @@ def test_camt_import(client):
     assert sorted(float(t["amount"]) for t in txs) == [-250.0, 1000.0]
 
 
+def test_camt_with_entity_declarations_is_rejected(client):
+    """Качен XML с ENTITY декларации („billion laughs") се отказва, а не се разгъва."""
+    h, acc_id = _setup(client, "camt-bomb@example.com")
+    bomb = (
+        b'<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol">\n'
+        b'<!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">\n'
+        b'<!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">]>\n'
+        b'<Document><Ntry><Amt Ccy="EUR">&lol3;</Amt></Ntry></Document>'
+    )
+    r = client.post(f"{BANK}/accounts/{acc_id}/import-camt", headers=h,
+                    files={"file": ("bomb.xml", bomb, "application/xml")})
+    assert r.status_code == 422
+    assert "Отказан CAMT XML" in r.json()["detail"]
+    assert client.get(f"{BANK}/transactions", headers=h).json() == []
+
+
 def test_mt940_empty_rejected(client):
     h, acc_id = _setup(client, "mt2@example.com")
     r = client.post(f"{BANK}/accounts/{acc_id}/import-mt940", headers=h,
