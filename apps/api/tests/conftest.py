@@ -10,8 +10,12 @@ from pathlib import Path
 
 import pytest
 
-_DB_PATH = Path(tempfile.gettempdir()) / "aifos_test.db"
-_DOCS_DIR = Path(tempfile.gettempdir()) / "aifos_test_docs"
+# Пътищата носят PID-а на процеса: две едновременни pytest сесии (напр. две
+# работни сесии по репото) иначе пишат в един и същ SQLite файл и го повреждат —
+# грешките изглеждат като бъгове в кода, а не са.
+_RUN_ID = os.getpid()
+_DB_PATH = Path(tempfile.gettempdir()) / f"aifos_test_{_RUN_ID}.db"
+_DOCS_DIR = Path(tempfile.gettempdir()) / f"aifos_test_docs_{_RUN_ID}"
 # По подразбиране SQLite (бързо, без зависимости). CI пуска СЪЩИТЕ тестове и срещу
 # PostgreSQL с TEST_DATABASE_URL — това е проверката, че кодът е съвместим с
 # production базата (типове, ограничения, транзакционен DDL).
