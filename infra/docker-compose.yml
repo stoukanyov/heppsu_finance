@@ -1,0 +1,130 @@
+# Стек на AI Finance OS — един файл за ВСИЧКИ среди (prod и pre-prod).
+#
+# Средите се различават само по .env и по compose project name, за да е сигурно,
+# че pre-prod тества точно същата конфигурация, която ще влезе в production.
+#
+# ВСИЧКИ относителни пътища са спрямо ДИРЕКТОРИЯТА НА СРЕДАТА (/srv/aifos/<env>),
+# не спрямо този файл. Затова compose се вика задължително с --project-directory:
+#
+#   docker compose -p aifos-prod \
+#       -f /srv/aifos/prod/release/infra/docker-compose.yml \
+#       --project-directory /srv/aifos/prod --env-file /srv/aifos/prod/.env up -d
+#
+# infra/deploy.sh го прави вместо теб.
+#
+# Подредба на средата:
+#   /srv/aifos/<env>/
+#     ├── .env        тайни (600) — извън release/, за да преживее rsync --delete
+#     ├── release/    кодът, разархивиран от git таг (никога от работна директория)
+#     ├── storage/    оригиналните сканирани документи
+#     └── backups/    дъмпове на базата
+#
+# Мрежова граница: единствено nginx публикува портове. PostgreSQL и API се виждат
+# само през вътрешната мрежа на compose.
+
+x-logging: &default-logging
+  driver: json-file
+  options: {max-size: "20m", max-file: "5"}
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aifos}
+      POSTGRES_USER: ${POSTGRES_USER:-aifos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD липсва в .env}
+      # C.UTF-8 е достатъчно: в съвременната българска азбука подредбата по кодови
+      # точки съвпада с азбучната. ICU collation, ако потрябва, се добавя по колона —
+      # глобалната промяна изисква нов initdb.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+      TZ: Europe/Sofia
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aifos} -d ${POSTGRES_DB:-aifos}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [backend]
+
+  # Миграциите са ОТДЕЛНА стъпка преди API-то, а не в entrypoint-а на приложението:
+  # при няколко uvicorn работника иначе няколко процеса тръгват едновременно към
+  # една и съща схема.
+  migrate:
+    image: ${AIFOS_IMAGE:-aifos-api:latest}
+    restart: "no"
+    logging: *default-logging
+    env_file: [./.env]
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [backend]
+
+  api:
+    build:
+      context: ./release/apps/api
+      dockerfile: Dockerfile
+    image: ${AIFOS_IMAGE:-aifos-api:latest}
+    restart: unless-stopped
+    logging: *default-logging
+    env_file: [./.env]
+    environment:
+      TZ: Europe/Sofia
+    volumes:
+      # Оригиналните сканирани документи живеят на хоста, за да преживеят
+      # пресъздаване на контейнера.
+      - ./storage:/app/storage
+    depends_on:
+      db: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5).status==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000",
+              "--workers", "${AIFOS_WORKERS:-4}", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    networks: [backend]
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "${AIFOS_HTTP_PORT:-80}:80"
+      - "${AIFOS_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./release/infra/nginx/conf.d:/etc/nginx/conf.d:ro
+      - certbot-webroot:/var/www/certbot
+      - certbot-conf:/etc/letsencrypt:ro
+    depends_on:
+      api: {condition: service_started}
+    networks: [backend]
+
+  # Подновява сертификата. Първото издаване е ръчно (виж infra/README.md);
+  # след това контейнерът проверява на всеки 12 часа.
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    logging: *default-logging
+    volumes:
+      - certbot-webroot:/var/www/certbot
+      - certbot-conf:/etc/letsencrypt
+    entrypoint: >
+      sh -c "trap exit TERM;
+      while :; do certbot renew --webroot -w /var/www/certbot --quiet;
+      sleep 12h & wait $${!}; done"
+    networks: [backend]
+
+volumes:
+  pgdata:
+  certbot-webroot:
+  certbot-conf:
+
+networks:
+  backend:

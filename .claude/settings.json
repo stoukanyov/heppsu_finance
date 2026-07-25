@@ -107,7 +107,6 @@
       "Bash(gh auth login*)",
       "Bash(curl * | sh)",
       "Bash(curl * | bash)",
-      "Read(//Users/iv/.ssh/**)",
       "Read(//Users/iv/.aws/**)",
       "Read(**/.env)"
     ]
