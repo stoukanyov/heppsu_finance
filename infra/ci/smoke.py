@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""Smoke тестове срещу РАЗГЪРНАТА среда.
+
+Модулните тестове доказват, че кодът е правилен. Тези тестове доказват, че точно
+този контейнер, с точно тази база и точно този nginx, върши реална работа —
+хващат счупен .env, недостъпна база, объркан reverse proxy, липсваща миграция.
+
+    python infra/ci/smoke.py http://127.0.0.1:8080
+
+Изход: 0 = всичко минава, 1 = има провал.
+Тестовете създават собствено дружество с уникален имейл и не пипат чужди данни.
+"""
+from __future__ import annotations
+
+import json
+import sys
+import time
+import urllib.error
+import urllib.request
+
+PASSED: list[str] = []
+FAILED: list[tuple[str, str]] = []
+
+
+def call(base: str, path: str, *, method: str = "GET", body=None,
+         token: str | None = None, company: str | None = None, expect: int | None = None):
+    req = urllib.request.Request(base + path, method=method)
+    req.add_header("Accept", "application/json")
+    if token:
+        req.add_header("Authorization", "Bearer " + token)
+    if company:
+        req.add_header("X-Company-Id", company)
+    data = None
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+        data = json.dumps(body).encode()
+    try:
+        with urllib.request.urlopen(req, data, timeout=30) as r:
+            status, payload = r.status, r.read()
+    except urllib.error.HTTPError as e:
+        status, payload = e.code, e.read()
+    if expect is not None and status != expect:
+        raise AssertionError(f"{method} {path} → {status}, очаквах {expect}: {payload[:200]!r}")
+    try:
+        return status, json.loads(payload or b"null")
+    except json.JSONDecodeError:
+        return status, payload.decode(errors="replace")
+
+
+def check(name: str):
+    """Декоратор: изпълнява проверка и записва резултата, без да спира останалите."""
+    def wrap(fn):
+        try:
+            fn()
+            PASSED.append(name)
+            print(f"\033[1;32m  ✓\033[0m {name}")
+        except Exception as exc:                       # noqa: BLE001 — искаме всички провали
+            FAILED.append((name, str(exc)))
+            print(f"\033[1;31m  ✗\033[0m {name}\n      {exc}")
+        return fn
+    return wrap
+
+
+def main(base: str) -> int:
+    base = base.rstrip("/")
+    api = base + "/api/v1"
+    stamp = int(time.time())
+    email = f"smoke-{stamp}@example.com"
+    password = "smoke-test-password-1"
+    state: dict = {}
+
+    print(f"\n\033[1;36m▸ Smoke тестове срещу {base}\033[0m\n")
+
+    @check("приложението отговаря (/health)")
+    def _():
+        _, d = call(api, "/health", expect=200)
+        assert d["status"] == "ok", d
+        state["environment"] = d.get("environment")
+
+    @check("базата е достъпна (/health/db)")
+    def _():
+        _, d = call(api, "/health/db", expect=200)
+        assert d["status"] == "ok", d
+
+    @check("уеб приложението се сервира (/app/)")
+    def _():
+        req = urllib.request.Request(base + "/app/")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            html = r.read().decode("utf-8", "replace")
+        assert r.status == 200, r.status
+        assert "AI Finance OS" in html, "липсва заглавието"
+        assert "id=\"shell\"" in html, "липсва приложната обвивка"
+
+    @check("защитен endpoint отказва достъп без токен")
+    def _():
+        call(api, "/companies", expect=401)
+
+    @check("регистрация и вход")
+    def _():
+        call(api, "/auth/register", method="POST",
+             body={"email": email, "password": password, "full_name": "Smoke Тест"},
+             expect=201)
+        _, d = call(api, "/auth/login", method="POST",
+                    body={"email": email, "password": password}, expect=200)
+        assert d.get("access_token"), d
+        state["token"] = d["access_token"]
+
+    @check("грешна парола не пуска")
+    def _():
+        call(api, "/auth/login", method="POST",
+             body={"email": email, "password": "грешна"}, expect=401)
+
+    @check("създаване на дружество")
+    def _():
+        _, d = call(api, "/companies", method="POST",
+                    body={"name": f"Smoke ЕООД {stamp}", "eik": "208418861"},
+                    token=state["token"], expect=201)
+        state["company"] = d["id"]
+
+    @check("зареждане на сметкоплан")
+    def _():
+        _, d = call(api, "/accounting/chart/seed", method="POST", body={},
+                    token=state["token"], company=state["company"], expect=201)
+        assert len(d) > 20, f"само {len(d)} сметки"
+        state["accounts"] = {a["code"]: a["id"] for a in d}
+
+    @check("създаване на фискална година")
+    def _():
+        call(api, "/accounting/fiscal-years", method="POST", body={"year": 2026},
+             token=state["token"], company=state["company"], expect=201)
+
+    @check("осчетоводяване на операция")
+    def _():
+        acc = state["accounts"]
+        _, e = call(api, "/accounting/journal-entries", method="POST", body={
+            "document_date": "2026-07-15", "document_number": "SMOKE-1",
+            "description": "Smoke тест",
+            "lines": [{"account_id": acc["501"], "debit": "1234.56", "credit": "0"},
+                      {"account_id": acc["703"], "debit": "0", "credit": "1234.56"}],
+        }, token=state["token"], company=state["company"], expect=201)
+        call(api, f"/accounting/journal-entries/{e['id']}/post", method="POST", body={},
+             token=state["token"], company=state["company"], expect=200)
+
+    @check("небалансирана операция се отказва")
+    def _():
+        acc = state["accounts"]
+        call(api, "/accounting/journal-entries", method="POST", body={
+            "document_date": "2026-07-15", "document_number": "SMOKE-BAD",
+            "lines": [{"account_id": acc["501"], "debit": "100.00", "credit": "0"},
+                      {"account_id": acc["703"], "debit": "0", "credit": "99.00"}],
+        }, token=state["token"], company=state["company"], expect=422)
+
+    @check("оборотната ведомост е балансирана")
+    def _():
+        _, d = call(api, "/reports/trial-balance",
+                    token=state["token"], company=state["company"], expect=200)
+        assert d["is_balanced"], d
+        assert float(d["total_debit_turnover"]) == 1234.56, d["total_debit_turnover"]
+
+    @check("ОПР отразява прихода")
+    def _():
+        _, d = call(api, "/reports/profit-and-loss?date_from=2026-07-01&date_to=2026-07-31",
+                    token=state["token"], company=state["company"], expect=200)
+        assert float(d["revenue"]["total"]) == 1234.56, d["revenue"]
+
+    @check("времевият ред за таблото работи")
+    def _():
+        _, d = call(api, "/reports/kpi-series?months=6&end=2026-07-31",
+                    token=state["token"], company=state["company"], expect=200)
+        assert len(d["points"]) == 6, len(d["points"])
+        assert float(d["points"][-1]["revenue"]) == 1234.56, d["points"][-1]
+
+    @check("сроковете към НАП се изчисляват")
+    def _():
+        _, d = call(api, "/deadlines/upcoming?days_ahead=60",
+                    token=state["token"], company=state["company"], expect=200)
+        assert isinstance(d, list), d
+
+    @check("чуждо дружество е недостъпно")
+    def _():
+        call(api, "/reports/trial-balance", token=state["token"],
+             company="00000000-0000-0000-0000-000000000000", expect=403)
+
+    @check("SAF-T експортът се генерира")
+    def _():
+        _, d = call(api, "/submissions/saft/preview?date_from=2026-07-01&date_to=2026-07-31",
+                    token=state["token"], company=state["company"], expect=200)
+        assert d["size_bytes"] > 0, d
+
+    print()
+    if FAILED:
+        print(f"\033[1;31m✗ {len(FAILED)} от {len(PASSED) + len(FAILED)} проверки се провалиха\033[0m")
+        for name, err in FAILED:
+            print(f"   · {name}: {err}")
+        return 1
+    print(f"\033[1;32m✓ всички {len(PASSED)} проверки минаха "
+          f"(среда: {state.get('environment')})\033[0m")
+    return 0
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("употреба: smoke.py <base-url>", file=sys.stderr)
+        raise SystemExit(2)
+    raise SystemExit(main(sys.argv[1]))

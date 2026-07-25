@@ -1,0 +1,125 @@
+# Деплой по средите.
+#
+# Път на промяната:
+#   push към main  →  pre-prod  →  smoke тестове  →  (ръчно одобрение)  →  prod
+#
+# Production се пуска САМО от таг (v*), никога от клон. Така всяко production
+# издание има име, което може да се посочи, върне и сравни.
+#
+# Нужни secrets в хранилището:
+#   DEPLOY_SSH_KEY   частният ключ на CI (публичният е в authorized_keys на deploy)
+#   DEPLOY_HOST      IP или домейн на сървъра
+#   DEPLOY_USER      deploy
+#   DEPLOY_KNOWN_HOSTS   изходът от `ssh-keyscan -t ed25519 <host>`
+name: Деплой
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Среда
+        required: true
+        default: preprod
+        type: choice
+        options: [preprod, prod]
+      ref:
+        description: Git ref за деплой
+        required: false
+        default: ""
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false        # деплой НЕ се прекъсва по средата
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Портата: без зелени тестове нищо не тръгва към сървъра.
+  # ─────────────────────────────────────────────────────────────────────────────
+  gate:
+    name: Проверки преди деплой
+    uses: ./.github/workflows/integration.yml
+
+  preprod:
+    name: Pre-prod
+    needs: gate
+    if: github.ref == 'refs/heads/main' || inputs.environment == 'preprod'
+    runs-on: ubuntu-latest
+    environment:
+      name: preprod
+      url: http://${{ secrets.DEPLOY_HOST }}:8080/app/
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: SSH достъп
+        run: |
+          install -d -m 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host heppsu-deploy
+              HostName ${{ secrets.DEPLOY_HOST }}
+              User ${{ secrets.DEPLOY_USER }}
+              IdentityFile ~/.ssh/id_deploy
+              IdentitiesOnly yes
+          EOF
+
+      - name: Деплой към pre-prod
+        run: ./infra/deploy.sh preprod ${{ inputs.ref || github.sha }}
+
+      - name: Smoke тестове
+        run: |
+          ssh heppsu-deploy 'mkdir -p /tmp/ci'
+          scp infra/ci/smoke.py heppsu-deploy:/tmp/ci/smoke.py
+          ssh heppsu-deploy 'python3 /tmp/ci/smoke.py http://127.0.0.1:8080'
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Production: само от таг и само след ръчно одобрение (GitHub Environment с
+  # required reviewers). Репетицията на миграциите върху КОПИЕ на реалната база
+  # е последната преграда пред загуба на данни.
+  # ─────────────────────────────────────────────────────────────────────────────
+  prod:
+    name: Production
+    needs: gate
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    environment:
+      name: prod                    # изисква ръчно одобрение в настройките на хранилището
+      url: https://${{ secrets.DEPLOY_HOST }}/app/
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: SSH достъп
+        run: |
+          install -d -m 700 ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host heppsu-deploy
+              HostName ${{ secrets.DEPLOY_HOST }}
+              User ${{ secrets.DEPLOY_USER }}
+              IdentityFile ~/.ssh/id_deploy
+              IdentitiesOnly yes
+          EOF
+
+      - name: Репетиция на миграциите върху копие на production базата
+        run: ssh heppsu-deploy 'bash /srv/aifos/prod/release/infra/ci/rehearse-migrations.sh'
+
+      - name: Деплой към production
+        run: ./infra/deploy.sh prod ${{ inputs.ref || github.ref_name }}
+
+      - name: Smoke тестове
+        run: |
+          ssh heppsu-deploy 'mkdir -p /tmp/ci'
+          scp infra/ci/smoke.py heppsu-deploy:/tmp/ci/smoke.py
+          ssh heppsu-deploy 'python3 /tmp/ci/smoke.py http://127.0.0.1:80'
