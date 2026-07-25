@@ -191,8 +191,40 @@ def update_document(
     return doc
 
 
+# Статуси, които представляват одобрение — за тях важи правилото „четири очи“.
+APPROVAL_STATUSES = frozenset({DocumentStatus.APPROVED, DocumentStatus.POSTED})
+
+
+def _require_different_checker(
+    db: Session, company_id: uuid.UUID, user_id: uuid.UUID, doc: Document
+) -> None:
+    """Maker-checker: качилият документа не може сам да го одобри/осчетоводи.
+
+    Логиката живее в RBAC модула — тук само подаваме контекста, за да няма втора,
+    паралелна система за права.
+    """
+    from app.modules.companies.models import Company
+    from app.modules.rbac import service as rbac_service
+
+    company = db.get(Company, company_id)
+    if company is None:  # pragma: no cover — скоупът вече е проверен от dependency-то
+        return
+    rbac_service.require_maker_checker(
+        db,
+        company,
+        checker_user_id=user_id,
+        maker_user_id=doc.uploaded_by_id,
+        permission="documents.approve",
+        subject="Документът",
+    )
+
+
 def update_status(
-    db: Session, company_id: uuid.UUID, doc_id: uuid.UUID, new_status: DocumentStatus
+    db: Session,
+    company_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    new_status: DocumentStatus,
+    user_id: uuid.UUID | None = None,
 ) -> Document:
     doc = get_document(db, company_id, doc_id)
     if new_status == doc.status:
@@ -202,6 +234,8 @@ def update_status(
             f"Недопустим преход на статус: {doc.status.value} → {new_status.value}",
             status.HTTP_409_CONFLICT,
         )
+    if user_id is not None and new_status in APPROVAL_STATUSES:
+        _require_different_checker(db, company_id, user_id, doc)
     doc.status = new_status
     db.commit()
     db.refresh(doc)
@@ -217,6 +251,9 @@ def confirm_posting(
     минава PROPOSED → APPROVED → POSTED наведнъж, за да не увисне в междинно
     състояние. Ако статията вече е осчетоводена, връща я без промяна
     (идемпотентност при повторно натискане от клиента).
+
+    Ако компанията е включила maker-checker, качилият документа получава 403 —
+    осчетоводяването изисква второ чифт очи.
     """
     # Локален импорт: accounting е по-долен слой и не бива да се зарежда на
     # ниво модул тук, за да остане зависимостта еднопосочна.
@@ -229,6 +266,12 @@ def confirm_posting(
             "Документът няма предложена счетоводна статия за потвърждаване",
             status.HTTP_409_CONFLICT,
         )
+
+    # Проверката е преди всяка промяна: при отказ нищо не е мръднало.
+    # Изключение: вече осчетоводен документ — повторното натискане е no-op и не бива
+    # да се превръща в грешка (идемпотентността е по-стара гаранция от правилото).
+    if doc.status != DocumentStatus.POSTED:
+        _require_different_checker(db, company_id, user_id, doc)
 
     entry = accounting_service.get_entry(db, company_id, doc.journal_entry_id)
     if entry.status == EntryStatus.DRAFT:

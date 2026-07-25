@@ -12,11 +12,13 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.errors import AccessDeniedError
-from app.modules.companies.models import CompanyRole, Membership
+from app.modules.companies.models import Company, CompanyRole, Membership
 from app.modules.rbac.models import Role
 from app.modules.rbac.permissions import (
     ALL_PERMISSIONS,
+    PERMISSION_LABELS,
     ROLE_TEMPLATES,
     ROLE_TEMPLATES_BY_CODE,
     WILDCARD,
@@ -223,6 +225,86 @@ def require_mobile_access(db: Session, membership: Membership) -> None:
             code="MOBILE_ACCESS_DENIED",
             role=role.name if role else None,
         )
+
+
+# ============================ Maker-checker („четири очи“) ============================
+# Колко имена да изброим в съобщението — списък от 30 души не помага на никого.
+_MAX_SUGGESTED_CHECKERS = 3
+
+
+def maker_checker_enabled(company: Company) -> bool:
+    """Важи ли правилото „четири очи“ за тази компания.
+
+    Решението е на ниво **компания**, а не само глобално, защото системата е
+    мултитенант: първият клиент е фирма с един човек и включено правило би я блокирала
+    напълно, докато счетоводна къща с екип го иска от първия ден. Глобалната настройка
+    `MAKER_CHECKER_ENABLED` остава като подразбиране за компаниите, които не са решавали
+    (колоната е NULL), и е изключена — безопасното поведение е днешното.
+    """
+    if company.maker_checker_enabled is None:
+        return settings.MAKER_CHECKER_ENABLED
+    return bool(company.maker_checker_enabled)
+
+
+def eligible_checkers(
+    db: Session, company_id: uuid.UUID, permission: str, exclude_user_id: uuid.UUID | None = None
+) -> list[Membership]:
+    """Членовете на компанията, които имат нужното право (за да ги посочим по име)."""
+    memberships = db.scalars(select(Membership).where(Membership.company_id == company_id))
+    return [
+        m
+        for m in memberships
+        if m.user_id != exclude_user_id and has_permission(db, m, permission)
+    ]
+
+
+def _checker_names(db: Session, memberships: list[Membership]) -> str:
+    from app.modules.identity.models import User
+
+    names: list[str] = []
+    for m in memberships[:_MAX_SUGGESTED_CHECKERS]:
+        user = db.get(User, m.user_id)
+        if user is not None:
+            names.append(user.full_name or user.email)
+    return ", ".join(names)
+
+
+def require_maker_checker(
+    db: Session,
+    company: Company,
+    *,
+    checker_user_id: uuid.UUID,
+    maker_user_id: uuid.UUID | None,
+    permission: str,
+    subject: str = "Документът",
+) -> None:
+    """Налага разделянето на задълженията: който е подал, не одобрява.
+
+    Проверката е допълнение към правата, а не замяна: правото (`permission`) вече е
+    изискано от рутера през `require(...)`; тук проверяваме само че одобряващият е
+    различен човек. При нарушение съобщението казва конкретно кой може да одобри.
+    """
+    if maker_user_id is None or maker_user_id != checker_user_id:
+        return
+    if not maker_checker_enabled(company):
+        return
+
+    candidates = eligible_checkers(db, company.id, permission, exclude_user_id=checker_user_id)
+    label = PERMISSION_LABELS.get(permission, permission)
+    if candidates:
+        who = _checker_names(db, candidates)
+        tail = f"Одобрението трябва да дойде от друг човек с право „{label}“: {who}."
+    else:
+        tail = (
+            f"В дружеството няма друг човек с право „{label}“ — администраторът трябва да "
+            "добави одобряващ или да изключи правилото за четири очи."
+        )
+    raise AccessDeniedError(
+        f"{subject} е подаден от вас и не може да бъде одобрен от самия вас "
+        f"(принцип „четири очи“). {tail}",
+        code="MAKER_CHECKER_VIOLATION",
+        required_permission=permission,
+    )
 
 
 def require_admin(db: Session, membership: Membership) -> None:

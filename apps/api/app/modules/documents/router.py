@@ -226,4 +226,13 @@ def correct_extraction(
 def update_document_status(
     doc_id: uuid.UUID, data: DocumentStatusUpdate, ctx: CurrentCompany, db: DbSession
 ) -> DocumentOut:
-    return DocumentOut.model_validate(service.update_status(db, ctx.company.id, doc_id, data.status))
+    """Придвижва документа по жизнения му цикъл.
+
+    Одобряващите преходи (APPROVED/POSTED) минават и през maker-checker, ако
+    компанията го е включила — качилият документа не може да го одобри сам.
+    """
+    return DocumentOut.model_validate(
+        service.update_status(
+            db, ctx.company.id, doc_id, data.status, user_id=ctx.membership.user_id
+        )
+    )

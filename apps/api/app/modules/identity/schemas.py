@@ -25,5 +25,23 @@ class LoginRequest(BaseModel):
 
 
 class Token(BaseModel):
+    """Двойката токени. Формата е фиксирана — мобилният клиент чете точно тези имена.
+
+    `access_token` умишлено остава с непроменени име и семантика: уеб приложението и
+    съществуващите тестове разчитат на него.
+    """
+
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
+    expires_in: int  # живот на access токена в секунди
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=1, max_length=512)
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str = Field(min_length=1, max_length=512)
+    # По подразбиране излизаме само от текущото устройство.
+    all_devices: bool = False

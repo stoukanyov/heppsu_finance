@@ -54,6 +54,13 @@ class Company(UUIDMixin, TimestampMixin, Base):
     is_vat_registered: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+    # ---- Контролни политики ----
+    # Maker-checker („четири очи“): качилият документа не може сам да го осчетоводи.
+    # NULL = компанията не е решавала → важи глобалното `MAKER_CHECKER_ENABLED`.
+    # Нарочно е тристойностно: така по-късна промяна на глобалната политика хваща
+    # компаниите без изрично мнение, без да прегазва тези, които са избрали сами.
+    maker_checker_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
     # ---- Реквизити (за фактури, декларации и НАП файлове) ----
     name_latin: Mapped[str | None] = mapped_column(String(255), nullable=True)       # транслитерация
     legal_form: Mapped[str | None] = mapped_column(String(50), nullable=True)        # напр. ЕООД

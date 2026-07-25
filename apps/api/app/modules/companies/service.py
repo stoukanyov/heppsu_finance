@@ -14,6 +14,11 @@ _DETAIL_FIELDS = (
     "vat_registration_date", "incorporation_date", "share_capital",
 )
 
+# Ключови идентификатори + контролни политики, редактируеми през PATCH /companies/current.
+_POLICY_AND_CORE_FIELDS = (
+    "name", "eik", "vat_number", "is_vat_registered", "maker_checker_enabled",
+)
+
 
 def create_company(db: Session, data: CompanyCreate, owner_id: uuid.UUID) -> tuple[Company, Membership]:
     """Създава компания и прави създателя ѝ OWNER (в една транзакция)."""
@@ -41,7 +46,7 @@ def update_company(db: Session, company: Company, data: CompanyUpdate) -> Compan
     """Обновява реквизитите на компанията (само подадените полета)."""
     payload = data.model_dump(exclude_unset=True)
     for field, value in payload.items():
-        if field in _DETAIL_FIELDS or field in ("name", "eik", "vat_number", "is_vat_registered"):
+        if field in _DETAIL_FIELDS or field in _POLICY_AND_CORE_FIELDS:
             setattr(company, field, value)
     db.commit()
     db.refresh(company)

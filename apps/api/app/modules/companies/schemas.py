@@ -42,6 +42,9 @@ class CompanyUpdate(CompanyDetails):
     eik: str | None = Field(default=None, max_length=20)
     vat_number: str | None = Field(default=None, max_length=20)
     is_vat_registered: bool | None = None
+    # Maker-checker: True/False задава политиката на дружеството. Не подадено поле
+    # означава „не пипай“ (виж `exclude_unset` в service.update_company).
+    maker_checker_enabled: bool | None = None
 
 
 class CompanyOut(CompanyDetails):
@@ -55,6 +58,8 @@ class CompanyOut(CompanyDetails):
     base_currency: str
     is_vat_registered: bool
     is_active: bool
+    # None = важи глобалната стойност (`MAKER_CHECKER_ENABLED`).
+    maker_checker_enabled: bool | None = None
 
 
 class CompanyWithRole(CompanyOut):

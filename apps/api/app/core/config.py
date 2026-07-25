@@ -17,6 +17,9 @@ MIN_SECRET_KEY_BYTES = 32
 PRODUCTION_ENVIRONMENTS = frozenset({"production", "prod", "staging"})
 # Подписваме със споделен таен ключ → само симетрични алгоритми. „none“ никога.
 ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
+# Препоръчителен живот на access токена, след като всички клиенти ползват /auth/refresh.
+# Не е стойност по подразбиране — виж коментара при ACCESS_TOKEN_EXPIRE_MINUTES.
+RECOMMENDED_ACCESS_TOKEN_MINUTES = 15
 
 
 class Settings(BaseSettings):
@@ -34,7 +37,19 @@ class Settings(BaseSettings):
     # Сигурност / JWT
     SECRET_KEY: str = DEFAULT_SECRET_KEY
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 12  # 12 часа
+    # Access токенът е самодостатъчен (JWT) и НЕ може да бъде отменен, докато не изтече —
+    # затова правилната стойност е кратка (виж RECOMMENDED_ACCESS_TOKEN_MINUTES).
+    #
+    # Подразбиращата се стойност обаче остава 12 часа, защото вграденото уеб приложение
+    # (`app/web/index.html`) още няма refresh логика: то пази токена в localStorage и
+    # никога не вика `POST /auth/refresh`. С 15 минути потребителят му би въвеждал парола
+    # четири пъти на час. Свали я на 15 в `.env` веднага щом уебът почне да ротира.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 12  # 12 часа (безопасно за уеба; виж по-горе)
+
+    # ---- Refresh токени (ротация с откриване на преизползване) ----
+    # Непрозрачен случаен низ, пазен в базата само като SHA-256 хеш. Дълъг живот, но
+    # отменяем: при logout, при ротация и масово — при кражба.
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # ---- Ограничаване на опитите (brute force защита) ----
     # Плъзгащ прозорец в паметта на процеса. Изключваемо (тестове, отладка).
@@ -76,6 +91,12 @@ class Settings(BaseSettings):
     # Срокове: подаване до 14-о число; възстановяване в 30 дни след приключване.
     VAT_SUBMISSION_DAY: int = 14
     VAT_REFUND_DEADLINE_DAYS: int = 30
+
+    # ---- Maker-checker (принцип „четири очи“) ----
+    # Глобална стойност по подразбиране за нови и за компании без изрична настройка.
+    # Изключено: първият клиент е фирма с един човек и включването би я блокирало.
+    # Всяка компания може да го включи за себе си (`companies.maker_checker_enabled`).
+    MAKER_CHECKER_ENABLED: bool = False
 
     # ---- Авто-осчетоводяване на разпознати документи ----
     # Ако е True, документ с достатъчна увереност се осчетоводява автоматично
