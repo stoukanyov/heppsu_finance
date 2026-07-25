@@ -190,3 +190,64 @@ def test_nap_files_zip(client):
     assert "50;" in deklar or "60;" in deklar  # има клетка резултат
     vies = zf.read("VIES.TXT").decode("cp1251")
     assert "DE111111111" in vies
+
+
+def test_close_vat_period(client):
+    h, codes = _setup_vat(client, "vatclose@example.com")
+    ACC = "/api/v1/accounting"
+    accounts = {a["code"]: a for a in client.get(f"{ACC}/accounts", headers=h).json()}
+    def je(dr, cr, amt, num):
+        e = client.post(f"{ACC}/journal-entries", headers=h, json={"document_date": "2026-07-15", "document_number": num,
+            "lines": [{"account_id": accounts[dr]["id"], "debit": amt, "credit": "0"},
+                      {"account_id": accounts[cr]["id"], "debit": "0", "credit": amt}]}).json()
+        client.post(f"{ACC}/journal-entries/{e['id']}/post", headers=h)
+    # продажба: Дт 411 1200 / Кт 703 1000 / Кт 4532 200  → тук опростено две операции
+    je("411", "703", "1000.00", "S-1")
+    je("411", "4532", "200.00", "S-1v")   # начислен ДДС продажби
+    # покупка: Дт 4531 100 (данъчен кредит)
+    je("4531", "401", "100.00", "P-1v")
+
+    pid = _period_id(client, h)
+    r = client.post(f"{VAT}/periods/{pid}/close", headers=h)
+    assert r.status_code == 201, r.text
+    cl = r.json()
+    assert float(cl["output_vat"]) == 200.0
+    assert float(cl["input_vat"]) == 100.0
+    assert float(cl["net_payable"]) == 100.0
+    assert float(cl["net_refundable"]) == 0.0
+    assert cl["journal_entry_id"]
+
+    # приключвателната операция зануляет 4531/4532 и дава 100 в 4538
+    tb = {x["code"]: x for x in client.get("/api/v1/reports/trial-balance", headers=h).json()["rows"]}
+    assert float(tb["4532"]["closing_balance"]) == 0.0
+    assert float(tb["4531"]["closing_balance"]) == 0.0
+    assert float(tb["4538"]["closing_balance"]) == -100.0   # кредитно салдо = задължение за внасяне
+
+
+def test_close_twice_rejected(client):
+    h, codes = _setup_vat(client, "vatclose2@example.com")
+    ACC = "/api/v1/accounting"
+    accounts = {a["code"]: a for a in client.get(f"{ACC}/accounts", headers=h).json()}
+    e = client.post(f"{ACC}/journal-entries", headers=h, json={"document_date": "2026-07-15", "document_number": "S",
+        "lines": [{"account_id": accounts["411"]["id"], "debit": "200.00", "credit": "0"},
+                  {"account_id": accounts["4532"]["id"], "debit": "0", "credit": "200.00"}]}).json()
+    client.post(f"{ACC}/journal-entries/{e['id']}/post", headers=h)
+    pid = _period_id(client, h)
+    assert client.post(f"{VAT}/periods/{pid}/close", headers=h).status_code == 201
+    assert client.post(f"{VAT}/periods/{pid}/close", headers=h).status_code == 409
+
+
+def test_no_vat_entries_after_closing(client):
+    h, codes = _setup_vat(client, "vatclose3@example.com")
+    ACC = "/api/v1/accounting"
+    accounts = {a["code"]: a for a in client.get(f"{ACC}/accounts", headers=h).json()}
+    e = client.post(f"{ACC}/journal-entries", headers=h, json={"document_date": "2026-07-15", "document_number": "S",
+        "lines": [{"account_id": accounts["411"]["id"], "debit": "200.00", "credit": "0"},
+                  {"account_id": accounts["4532"]["id"], "debit": "0", "credit": "200.00"}]}).json()
+    client.post(f"{ACC}/journal-entries/{e['id']}/post", headers=h)
+    pid = _period_id(client, h)
+    client.post(f"{VAT}/periods/{pid}/close", headers=h)
+    # нов ДДС запис в приключен период се отхвърля
+    r = client.post(f"{VAT}/entries", headers=h, json=_entry(codes["S20"]["id"], "500.00", doc="LATE"))
+    assert r.status_code == 409
+    assert "приключен" in r.json()["detail"]

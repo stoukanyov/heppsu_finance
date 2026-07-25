@@ -97,3 +97,34 @@ class VatEntry(UUIDMixin, TimestampMixin, Base):
     )
 
     vat_code: Mapped["VatCode"] = relationship()
+
+
+class VatPeriodClosing(UUIDMixin, TimestampMixin, Base):
+    """Приключване на ДДС период — осчетоводен резултат за периода (VAT Period Closing).
+
+    Затваря ДДС сметките (4531/4532) и осчетоводява резултата към 4538 (за внасяне)
+    или 4539 (за възстановяване). След приключване не се допускат нови ДДС записи в
+    периода. Един запис на компания+период (уникалност).
+    """
+
+    __tablename__ = "vat_period_closings"
+    __table_args__ = (
+        UniqueConstraint("company_id", "period_id", name="uq_vat_closing_company_period"),
+    )
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("companies.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    period_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("accounting_periods.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    journal_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("journal_entries.id", ondelete="SET NULL"), nullable=True
+    )
+    output_vat: Mapped[Decimal] = mapped_column(Money, default=ZERO, nullable=False)   # начислен ДДС (4532)
+    input_vat: Mapped[Decimal] = mapped_column(Money, default=ZERO, nullable=False)    # данъчен кредит (4531)
+    net_payable: Mapped[Decimal] = mapped_column(Money, default=ZERO, nullable=False)      # ДДС за внасяне
+    net_refundable: Mapped[Decimal] = mapped_column(Money, default=ZERO, nullable=False)   # ДДС за възстановяване
+    closed_by_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )

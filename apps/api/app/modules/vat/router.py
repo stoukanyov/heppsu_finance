@@ -13,6 +13,7 @@ from app.modules.vat.schemas import (
     VatDeclarationOut,
     VatEntryCreate,
     VatEntryOut,
+    VatPeriodClosingOut,
     VatReturnOut,
 )
 
@@ -63,6 +64,19 @@ def get_vat_return(period_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> 
 @router.get("/periods/{period_id}/controls", response_model=list[VatControl])
 def get_vat_controls(period_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> list[VatControl]:
     return service.vat_period_controls(db, ctx.company.id, period_id)
+
+
+# ---------- Приключване на ДДС период ----------
+@router.post("/periods/{period_id}/close", response_model=VatPeriodClosingOut, status_code=status.HTTP_201_CREATED)
+def close_vat_period(period_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> VatPeriodClosingOut:
+    closing = service.close_vat_period(db, ctx.company.id, ctx.membership.user_id, period_id)
+    return VatPeriodClosingOut.model_validate(closing)
+
+
+@router.get("/periods/{period_id}/closing", response_model=VatPeriodClosingOut | None)
+def get_vat_closing(period_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> VatPeriodClosingOut | None:
+    closing = service.get_vat_closing(db, ctx.company.id, period_id)
+    return VatPeriodClosingOut.model_validate(closing) if closing else None
 
 
 # ---------- Справка-декларация по ЗДДС и файлове за НАП ----------

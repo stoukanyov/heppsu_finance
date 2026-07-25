@@ -108,3 +108,17 @@ class VatDeclarationOut(BaseModel):
     cells: list[DeclarationCell]
     has_blocking_errors: bool
     controls: list[VatControl]
+
+
+# ---------- Приключване на ДДС период ----------
+class VatPeriodClosingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    period_id: uuid.UUID
+    journal_entry_id: uuid.UUID | None
+    output_vat: Decimal
+    input_vat: Decimal
+    net_payable: Decimal
+    net_refundable: Decimal
+    created_at: dt.datetime

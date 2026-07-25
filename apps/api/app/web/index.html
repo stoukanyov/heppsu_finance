@@ -688,20 +688,29 @@ async function viewVat(main){
     <div class="steps"><div class="step done"><span class="n">1</span>Данни</div><div class="step-sep"></div><div class="step active"><span class="n">2</span>Проверка</div><div class="step-sep"></div><div class="step"><span class="n">3</span>Декларация</div><div class="step-sep"></div><div class="step"><span class="n">4</span>Подписване</div><div class="step-sep"></div><div class="step"><span class="n">5</span>Подаване</div></div>
     <div class="toolbar"><div class="field" style="margin:0;min-width:180px;"><label>Данъчен период</label><select id="v-period">${periods.map(p=>`<option value="${p.id}">${esc(p.code)}</option>`).join('')}</select></div>
       <button id="v-load" class="primary" style="align-self:flex-end;">Изчисли декларация</button>
-      <button id="v-nap" style="align-self:flex-end;">${ic('download')}Файлове за НАП (.zip)</button></div>
+      <button id="v-nap" style="align-self:flex-end;">${ic('download')}Файлове за НАП (.zip)</button>
+      <button id="v-close" style="align-self:flex-end;border-color:var(--good);color:var(--good);">${ic('check')}Приключи ДДС период</button></div>
     <div id="v-result">${loading()}</div>`;
   const load=()=>loadVatDeclaration(document.getElementById('v-period').value);
   document.getElementById('v-load').onclick=load; document.getElementById('v-period').onchange=load;
   document.getElementById('v-nap').onclick=()=>{ const s=document.getElementById('v-period'); blobDownload(`/vat/returns/${s.value}/nap-files`,`NAP-DDS-${s.selectedOptions[0].text.replace('-','')}.zip`); };
+  document.getElementById('v-close').onclick=async()=>{
+    const s=document.getElementById('v-period');
+    if(!confirm(`Приключване на ДДС период ${s.selectedOptions[0].text}? Ще се осчетоводи резултатът и периодът се заключва за ДДС.`)) return;
+    try{ const c=await api(`/vat/periods/${s.value}/close`,{method:'POST'}); toast(`Приключен · за внасяне ${fmt(c.net_payable)} / за възстановяване ${fmt(c.net_refundable)}`); load(); }
+    catch(e){ toast(e.message,true); } };
   load();
 }
 async function loadVatDeclaration(pid){
   const box=document.getElementById('v-result'); if(!box) return; box.innerHTML=loading();
   try{ const d=await api(`/vat/returns/${pid}/declaration`);
+    let closing=null; try{ closing=await api(`/vat/periods/${pid}/closing`); }catch{}
     const cell=n=>{ const c=d.cells.find(x=>x.cell===n); return c?Number(c.amount):0; };
     const payable=cell('50'), refundable=cell('60');
     const errs=d.controls.filter(c=>c.level==='ERROR'), warns=d.controls.filter(c=>c.level!=='ERROR');
-    box.innerHTML=`<div class="cols" style="margin-bottom:16px;">
+    const closedBanner = closing ? `<div class="card" style="margin-bottom:16px;border-color:var(--good);background:var(--good-soft);"><div class="flex spread"><div class="flex">${ic('check')}<b style="color:#15803d;">Периодът е приключен и осчетоводен</b></div><span class="pill s-green na">за внасяне ${fmt(closing.net_payable)} · за възстановяване ${fmt(closing.net_refundable)}</span></div></div>` : '';
+    const cb=document.getElementById('v-close'); if(cb){ cb.disabled=!!closing; cb.style.opacity=closing?'.5':'1'; }
+    box.innerHTML=closedBanner+`<div class="cols" style="margin-bottom:16px;">
         <div class="card kpi"><div class="top"><div><div class="l">ДДС за внасяне (к.50)</div><div class="v">${fmt(payable)}</div></div><div class="chip c-red">${ic('out')}</div></div></div>
         <div class="card kpi"><div class="top"><div><div class="l">ДДС за възстановяване (к.60)</div><div class="v">${fmt(refundable)}</div></div><div class="chip c-green">${ic('in')}</div></div></div></div>
       <div class="card" style="margin-bottom:16px;"><div class="card-t"><h3>Контроли и предупреждения</h3>${d.has_blocking_errors?'<span class="pill s-red">Има грешки</span>':'<span class="pill s-green">Готово за подаване</span>'}</div>

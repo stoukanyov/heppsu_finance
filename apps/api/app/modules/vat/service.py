@@ -8,20 +8,31 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.modules.accounting.models import AccountingPeriod
-from app.modules.accounting.service import find_period_for_date
+from app.modules.accounting.models import (
+    Account,
+    AccountingPeriod,
+    EntryStatus,
+    JournalEntry,
+    JournalLine,
+    JournalType,
+)
+from app.modules.accounting.schemas import JournalEntryCreate, JournalLineIn
+from app.modules.accounting.service import create_entry, find_period_for_date, post_entry
 from app.modules.companies.models import Company
-from app.modules.vat.models import VatCode, VatDirection, VatEntry
-from app.tax_engine.registry import get_provider
+from app.modules.vat.models import VatCode, VatDirection, VatEntry, VatPeriodClosing
 from app.modules.vat.schemas import (
     DeclarationCell,
     VatCodeCreate,
     VatControl,
     VatDeclarationOut,
     VatEntryCreate,
+    VatPeriodClosingOut,
     VatReturnOut,
     VatSideSummary,
 )
+from app.tax_engine.registry import get_provider
+
+_POSTED_LIKE = (EntryStatus.POSTED, EntryStatus.REVERSED, EntryStatus.REVERSAL)
 
 _CENT = Decimal("0.01")
 _TOLERANCE = Decimal("0.02")  # допустимо разминаване при закръгляне на ДДС
@@ -85,6 +96,12 @@ def create_vat_entry(
     period = find_period_for_date(db, company_id, on_date)
     if period is None:
         raise _err("Няма счетоводен период за датата на данъчното събитие")
+
+    if _closing_for_period(db, company_id, period.id) is not None:
+        raise _err(
+            f"ДДС периодът {period.code} е приключен — не се допускат нови ДДС записи",
+            status.HTTP_409_CONFLICT,
+        )
 
     expected_vat = _q(data.tax_base * vat_code.rate / Decimal("100"))
     if data.vat_amount is None:
@@ -270,6 +287,136 @@ def build_nap_files(
     zip_bytes, _cells = provider.build_filing_package(company, period.code, entries)
     per = period.code.replace("-", "")[:6]
     return zip_bytes, f"NAP-DDS-{per}.zip"
+
+
+# ============================ Приключване на ДДС период ============================
+_ACC_VAT_INPUT = "4531"       # Начислен ДДС на покупките (данъчен кредит) — актив
+_ACC_VAT_OUTPUT = "4532"      # Начислен ДДС на продажбите — пасив
+_ACC_VAT_PAYABLE = "4538"     # ДДС за внасяне — пасив
+_ACC_VAT_REFUNDABLE = "4539"  # ДДС за възстановяване — актив
+
+
+def _acc(db: Session, company_id: uuid.UUID, code: str) -> Account:
+    account = db.scalar(
+        select(Account).where(Account.company_id == company_id, Account.code == code)
+    )
+    if account is None:
+        raise _err(f"Липсва сметка {code} — инициализирай стандартния сметкоплан")
+    return account
+
+
+def _closing_for_period(
+    db: Session, company_id: uuid.UUID, period_id: uuid.UUID
+) -> VatPeriodClosing | None:
+    return db.scalar(
+        select(VatPeriodClosing).where(
+            VatPeriodClosing.company_id == company_id,
+            VatPeriodClosing.period_id == period_id,
+        )
+    )
+
+
+def _vat_account_balance(
+    db: Session, company_id: uuid.UUID, code: str, period: AccountingPeriod
+) -> Decimal:
+    """Нетен оборот (дебит − кредит) по сметка за периода, от осчетоводените операции."""
+    stmt = (
+        select(
+            func.coalesce(func.sum(JournalLine.debit_base), 0)
+            - func.coalesce(func.sum(JournalLine.credit_base), 0)
+        )
+        .select_from(JournalLine)
+        .join(JournalEntry, JournalLine.entry_id == JournalEntry.id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(
+            JournalEntry.company_id == company_id,
+            JournalEntry.status.in_(_POSTED_LIKE),
+            Account.code == code,
+            JournalEntry.document_date >= period.start_date,
+            JournalEntry.document_date <= period.end_date,
+        )
+    )
+    return _q(Decimal(db.scalar(stmt) or 0))
+
+
+def get_vat_closing(
+    db: Session, company_id: uuid.UUID, period_id: uuid.UUID
+) -> VatPeriodClosing | None:
+    _period_or_404(db, company_id, period_id)
+    return _closing_for_period(db, company_id, period_id)
+
+
+def close_vat_period(
+    db: Session, company_id: uuid.UUID, user_id: uuid.UUID, period_id: uuid.UUID
+) -> VatPeriodClosing:
+    """Приключва ДДС периода: осчетоводява резултата и заключва периода за ДДС."""
+    period = _period_or_404(db, company_id, period_id)
+    company = _company_or_404(db, company_id)
+
+    if _closing_for_period(db, company_id, period_id) is not None:
+        raise _err(f"ДДС периодът {period.code} вече е приключен", status.HTTP_409_CONFLICT)
+
+    controls = vat_period_controls(db, company_id, period_id)
+    if any(c.level == "ERROR" for c in controls):
+        raise _err("Има блокиращи грешки в контролите — приключването е спряно")
+
+    # Салда по ДДС сметките за периода
+    output_vat = -_vat_account_balance(db, company_id, _ACC_VAT_OUTPUT, period)  # пасив → кредитно салдо
+    input_vat = _vat_account_balance(db, company_id, _ACC_VAT_INPUT, period)     # актив → дебитно салдо
+    if output_vat < 0:
+        output_vat = Decimal("0.00")
+    if input_vat < 0:
+        input_vat = Decimal("0.00")
+    if output_vat == 0 and input_vat == 0:
+        raise _err("Няма движения по ДДС сметките (4531/4532) за приключване")
+
+    net = output_vat - input_vat  # >0 за внасяне, <0 за възстановяване
+
+    lines: list[JournalLineIn] = []
+    if output_vat > 0:
+        lines.append(JournalLineIn(account_id=_acc(db, company_id, _ACC_VAT_OUTPUT).id,
+                                   debit=output_vat, credit=Decimal("0.00")))
+    if input_vat > 0:
+        lines.append(JournalLineIn(account_id=_acc(db, company_id, _ACC_VAT_INPUT).id,
+                                   debit=Decimal("0.00"), credit=input_vat))
+    net_payable = Decimal("0.00")
+    net_refundable = Decimal("0.00")
+    if net > 0:
+        net_payable = net
+        lines.append(JournalLineIn(account_id=_acc(db, company_id, _ACC_VAT_PAYABLE).id,
+                                   debit=Decimal("0.00"), credit=net))
+    elif net < 0:
+        net_refundable = -net
+        lines.append(JournalLineIn(account_id=_acc(db, company_id, _ACC_VAT_REFUNDABLE).id,
+                                   debit=-net, credit=Decimal("0.00")))
+
+    entry = create_entry(
+        db, company, user_id,
+        JournalEntryCreate(
+            document_date=period.end_date,
+            journal=JournalType.CLOSING,
+            document_type="ДДС приключване",
+            document_number=f"ДДС-{period.code}",
+            description=f"Приключване на ДДС период {period.code}",
+            lines=lines,
+        ),
+    )
+    post_entry(db, company_id, entry.id, user_id)
+
+    closing = VatPeriodClosing(
+        company_id=company_id,
+        period_id=period_id,
+        journal_entry_id=entry.id,
+        output_vat=output_vat,
+        input_vat=input_vat,
+        net_payable=net_payable,
+        net_refundable=net_refundable,
+        closed_by_id=user_id,
+    )
+    db.add(closing)
+    db.commit()
+    db.refresh(closing)
+    return closing
 
 
 # ---------- Стандартни български ДДС кодове (стартов шаблон, Q-002) ----------
