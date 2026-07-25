@@ -7,12 +7,14 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
-    Enum as SAEnum,
     ForeignKey,
     Integer,
     Numeric,
     String,
     Uuid,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -60,7 +62,7 @@ class Counterparty(UUIDMixin, TimestampMixin, Base):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    bank_accounts: Mapped[list["CounterpartyBankAccount"]] = relationship(
+    bank_accounts: Mapped[list[CounterpartyBankAccount]] = relationship(
         back_populates="counterparty", cascade="all, delete-orphan"
     )
 
@@ -76,4 +78,4 @@ class CounterpartyBankAccount(UUIDMixin, Base):
     currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    counterparty: Mapped["Counterparty"] = relationship(back_populates="bank_accounts")
+    counterparty: Mapped[Counterparty] = relationship(back_populates="bank_accounts")

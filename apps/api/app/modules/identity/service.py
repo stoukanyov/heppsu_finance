@@ -55,7 +55,7 @@ def authenticate(db: Session, email: str, password: str) -> User | None:
 
 # ============================ Refresh токени ============================
 def _now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
+    return dt.datetime.now(dt.UTC)
 
 
 def _aware(value: dt.datetime | None) -> dt.datetime | None:
@@ -66,7 +66,7 @@ def _aware(value: dt.datetime | None) -> dt.datetime | None:
     """
     if value is None:
         return None
-    return value if value.tzinfo is not None else value.replace(tzinfo=dt.timezone.utc)
+    return value if value.tzinfo is not None else value.replace(tzinfo=dt.UTC)
 
 
 def _clip(value: str | None, length: int) -> str | None:

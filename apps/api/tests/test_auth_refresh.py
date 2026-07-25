@@ -203,7 +203,7 @@ def test_expired_refresh_token_is_rejected(client):
     with SessionLocal() as db:
         row = db.scalar(select(RefreshToken))
         assert row is not None
-        row.expires_at = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=1)
+        row.expires_at = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1)
         db.commit()
 
     r = _refresh(client, body["refresh_token"])

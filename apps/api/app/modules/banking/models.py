@@ -9,11 +9,13 @@ from decimal import Decimal
 from sqlalchemy import (
     Boolean,
     Date,
-    Enum as SAEnum,
     ForeignKey,
     Numeric,
     String,
     Uuid,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -73,7 +75,7 @@ class BankTransaction(UUIDMixin, TimestampMixin, Base):
         SAEnum(BankTxStatus, native_enum=False, length=20), default=BankTxStatus.UNMATCHED, nullable=False
     )
 
-    matches: Mapped[list["BankTransactionMatch"]] = relationship(
+    matches: Mapped[list[BankTransactionMatch]] = relationship(
         back_populates="transaction", cascade="all, delete-orphan"
     )
 
@@ -100,4 +102,4 @@ class BankTransactionMatch(UUIDMixin, TimestampMixin, Base):
         Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
 
-    transaction: Mapped["BankTransaction"] = relationship(back_populates="matches")
+    transaction: Mapped[BankTransaction] = relationship(back_populates="matches")

@@ -28,7 +28,7 @@ class User(UUIDMixin, TimestampMixin, Base):
     # Платформен супер-администратор (различен от роля в компания).
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    memberships: Mapped[list["Membership"]] = relationship(
+    memberships: Mapped[list[Membership]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 

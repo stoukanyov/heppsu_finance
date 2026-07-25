@@ -39,14 +39,14 @@ class TaxProvider(ABC):
     jurisdiction: TaxJurisdiction
 
     @abstractmethod
-    def compute_declaration(self, entries: list["VatEntry"]) -> "DeclarationCells":
+    def compute_declaration(self, entries: list[VatEntry]) -> DeclarationCells:
         """Агрегира данъчните записи в клетките на периодичната декларация."""
         raise NotImplementedError
 
     @abstractmethod
     def build_filing_package(
-        self, company: "Company", period_code: str, entries: list["VatEntry"]
-    ) -> tuple[bytes, "DeclarationCells"]:
+        self, company: Company, period_code: str, entries: list[VatEntry]
+    ) -> tuple[bytes, DeclarationCells]:
         """Генерира пакета файлове за подаване (напр. ZIP за НАП) + изчислените клетки."""
         raise NotImplementedError
 

@@ -37,7 +37,7 @@ class NraPortalPackageProvider(NraSubmissionProvider):
     portal_url = NRA_PORTAL_URL
 
     def prepare_package(
-        self, company: "Company", period_code: str, payload: bytes, contents: list[str]
+        self, company: Company, period_code: str, payload: bytes, contents: list[str]
     ) -> SubmissionPackage:
         ident = (company.vat_number or company.eik or "NOVAT").replace(" ", "")
         return SubmissionPackage(
@@ -66,7 +66,7 @@ class _FutureApiProvider(NraSubmissionProvider):
     portal_url = NRA_PORTAL_URL
 
     def prepare_package(
-        self, company: "Company", period_code: str, payload: bytes, contents: list[str]
+        self, company: Company, period_code: str, payload: bytes, contents: list[str]
     ) -> SubmissionPackage:
         return SubmissionPackage(
             filename=f"{self.code}-{period_code}.zip",
@@ -75,7 +75,7 @@ class _FutureApiProvider(NraSubmissionProvider):
             period_code=period_code,
         )
 
-    def submit(self, company: "Company", package: SubmissionPackage) -> dict:
+    def submit(self, company: Company, package: SubmissionPackage) -> dict:
         raise NotImplementedError(
             f"{self.name}: изчаква официална спецификация на НАП (тестова среда, "
             "автентикация, статуси и протоколи за приемане). Ползвай пакета за ръчно подаване."

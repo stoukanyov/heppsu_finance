@@ -9,7 +9,6 @@ from app.modules.accounting.schemas import JournalEntryOut
 from app.modules.ai import posting as ai_posting
 from app.modules.ai import service as ai_service
 from app.modules.ai.schemas import ExtractionOut, PostingProposalOut
-from app.modules.rbac import service as rbac_service
 from app.modules.documents import service
 from app.modules.documents.models import DocumentSource, DocumentStatus, DocumentType
 from app.modules.documents.schemas import (
@@ -20,6 +19,7 @@ from app.modules.documents.schemas import (
     PostingConfirmOut,
     ScanResultOut,
 )
+from app.modules.rbac import service as rbac_service
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 

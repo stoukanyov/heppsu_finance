@@ -255,7 +255,7 @@ def test_mobile_scan_uploads_and_ocrs(client):
 
 def test_get_extraction_returns_latest(client, monkeypatch):
     """Клиент, който отваря чужд документ, може да види разпознатото."""
-    from tests.test_ai_posting import _setup, _upload, _extract
+    from tests.test_ai_posting import _extract, _setup, _upload
 
     h, _ = _setup(client, "get-extraction@example.com")
     doc_id = _upload(client, h)

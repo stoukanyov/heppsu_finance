@@ -1,0 +1,52 @@
+name: API
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+# Ново бутане в същия клон отменя предишния пробег — не чакаме резултат за код,
+# който вече е заменен.
+concurrency:
+  group: api-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      - name: Инсталиране
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff==0.16.0
+
+      - name: Линтер
+        run: ruff check .
+
+      # Тестовете сами си задават средата (виж tests/conftest.py): временна SQLite
+      # база, AI_PROVIDER=stub, изключен rate limit. Затова тук няма env блок —
+      # ако някога потрябва, значи conftest е изгубил самодостатъчността си.
+      - name: Тестове
+        run: pytest -q
+
+      # Разминаване между моделите и миграциите се вижда чак в продукция, когато
+      # `create_all` в dev го е скривало месеци наред. Проверката е евтина.
+      - name: Миграциите минават от нула
+        env:
+          DATABASE_URL: sqlite:///${{ runner.temp }}/migrations.db
+          SECRET_KEY: ci-secret-key
+          ENVIRONMENT: test
+        run: alembic upgrade head

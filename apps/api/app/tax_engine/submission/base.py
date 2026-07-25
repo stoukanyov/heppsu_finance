@@ -55,19 +55,19 @@ class NraSubmissionProvider(ABC):
 
     @abstractmethod
     def prepare_package(
-        self, company: "Company", period_code: str, payload: bytes, contents: list[str]
+        self, company: Company, period_code: str, payload: bytes, contents: list[str]
     ) -> SubmissionPackage:
         """Оформя пакета за подаване (име на файл, съдържание, инструкции)."""
         raise NotImplementedError
 
-    def submit(self, company: "Company", package: SubmissionPackage) -> dict:
+    def submit(self, company: Company, package: SubmissionPackage) -> dict:
         """Електронно подаване — налично само при провайдър с такава възможност."""
         raise NotImplementedError(
             f"Провайдърът „{self.name}“ не поддържа електронно подаване. "
             "Подаването се извършва ръчно в портала на НАП с КЕП."
         )
 
-    def fetch_status(self, company: "Company", reference: str) -> dict:
+    def fetch_status(self, company: Company, reference: str) -> dict:
         raise NotImplementedError(
             f"Провайдърът „{self.name}“ не поддържа проверка на статус."
         )

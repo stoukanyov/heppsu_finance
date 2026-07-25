@@ -12,13 +12,15 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Date,
-    Enum as SAEnum,
     ForeignKey,
     Integer,
     Numeric,
     String,
     UniqueConstraint,
     Uuid,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -82,7 +84,7 @@ class FixedAsset(UUIDMixin, TimestampMixin, Base):
         Uuid, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
     )
 
-    depreciations: Mapped[list["DepreciationEntry"]] = relationship(
+    depreciations: Mapped[list[DepreciationEntry]] = relationship(
         back_populates="asset", cascade="all, delete-orphan"
     )
 
@@ -119,4 +121,4 @@ class DepreciationEntry(UUIDMixin, TimestampMixin, Base):
         Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
 
-    asset: Mapped["FixedAsset"] = relationship(back_populates="depreciations")
+    asset: Mapped[FixedAsset] = relationship(back_populates="depreciations")

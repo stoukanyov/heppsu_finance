@@ -6,20 +6,22 @@
 """
 from __future__ import annotations
 
+import datetime as dt
 import enum
 import uuid
-import datetime as dt
 from decimal import Decimal
 
 from sqlalchemy import (
     JSON,
     Date,
-    Enum as SAEnum,
     ForeignKey,
     Integer,
     Numeric,
     String,
     Uuid,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 

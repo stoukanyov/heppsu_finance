@@ -10,12 +10,14 @@ from typing import TYPE_CHECKING
 from sqlalchemy import (
     Boolean,
     Date,
-    Enum as SAEnum,
     ForeignKey,
     Numeric,
     String,
     UniqueConstraint,
     Uuid,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -82,7 +84,7 @@ class Company(UUIDMixin, TimestampMixin, Base):
         parts = [p for p in (self.address_city, self.address_postcode, self.address_line) if p]
         return ", ".join(parts)
 
-    memberships: Mapped[list["Membership"]] = relationship(
+    memberships: Mapped[list[Membership]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
     )
 
@@ -111,5 +113,5 @@ class Membership(UUIDMixin, TimestampMixin, Base):
         Uuid, ForeignKey("roles.id", ondelete="SET NULL"), index=True, nullable=True
     )
 
-    user: Mapped["User"] = relationship(back_populates="memberships")
-    company: Mapped["Company"] = relationship(back_populates="memberships")
+    user: Mapped[User] = relationship(back_populates="memberships")
+    company: Mapped[Company] = relationship(back_populates="memberships")

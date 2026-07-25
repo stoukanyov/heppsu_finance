@@ -18,12 +18,14 @@ from decimal import Decimal
 from sqlalchemy import (
     Boolean,
     Date,
-    Enum as SAEnum,
     ForeignKey,
     Numeric,
     String,
     UniqueConstraint,
     Uuid,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -96,7 +98,7 @@ class VatEntry(UUIDMixin, TimestampMixin, Base):
         Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
 
-    vat_code: Mapped["VatCode"] = relationship()
+    vat_code: Mapped[VatCode] = relationship()
 
 
 class VatPeriodClosing(UUIDMixin, TimestampMixin, Base):

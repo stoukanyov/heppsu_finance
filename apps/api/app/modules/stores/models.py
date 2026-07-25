@@ -11,7 +11,8 @@ import enum
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import Date, Enum as SAEnum, ForeignKey, Integer, Numeric, String, UniqueConstraint, Uuid
+from sqlalchemy import Date, ForeignKey, Integer, Numeric, String, UniqueConstraint, Uuid
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDMixin

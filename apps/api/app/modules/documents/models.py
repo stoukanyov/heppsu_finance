@@ -6,11 +6,13 @@ import uuid
 
 from sqlalchemy import (
     BigInteger,
-    Enum as SAEnum,
     ForeignKey,
     Index,
     String,
     Uuid,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 

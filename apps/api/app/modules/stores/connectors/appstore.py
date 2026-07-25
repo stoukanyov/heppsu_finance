@@ -37,7 +37,7 @@ class AppStoreConnector(StoreConnector):
     def _jwt(self) -> str:
         import jwt  # PyJWT
 
-        with open(settings.APPLE_PRIVATE_KEY_PATH, "r", encoding="utf-8") as fh:
+        with open(settings.APPLE_PRIVATE_KEY_PATH, encoding="utf-8") as fh:
             private_key = fh.read()
         now = int(time.time())
         payload = {"iss": settings.APPLE_ISSUER_ID, "iat": now, "exp": now + 900, "aud": _AUDIENCE}

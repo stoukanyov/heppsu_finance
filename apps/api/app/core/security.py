@@ -29,7 +29,7 @@ def verify_password(password: str, hashed: str) -> bool:
 
 
 def create_access_token(subject: str, expires_minutes: int | None = None) -> str:
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     expire = now + dt.timedelta(minutes=expires_minutes or settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     # `jti` прави всеки токен различен: без него две издавания в една и съща секунда
     # за един потребител дават буквално еднакъв низ и ротацията изглежда като no-op.

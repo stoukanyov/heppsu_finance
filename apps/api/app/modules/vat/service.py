@@ -206,7 +206,7 @@ def vat_period_controls(
         if e.document_number:
             seen[(e.direction, e.document_number, e.counterparty_vat_number)].append(e.id)
 
-    for (direction, doc_no, _vat), ids in seen.items():
+    for (_direction, doc_no, _vat), ids in seen.items():
         if len(ids) > 1:
             controls.append(
                 VatControl(

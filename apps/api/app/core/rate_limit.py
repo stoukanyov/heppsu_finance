@@ -28,8 +28,9 @@ import math
 import threading
 import time
 from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Annotated, Callable
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 

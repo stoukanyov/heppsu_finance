@@ -13,13 +13,15 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Date,
-    Enum as SAEnum,
     ForeignKey,
     Integer,
     Numeric,
     String,
     UniqueConstraint,
     Uuid,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -97,7 +99,7 @@ class Invoice(UUIDMixin, TimestampMixin, Base):
         Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
 
-    lines: Mapped[list["InvoiceLine"]] = relationship(
+    lines: Mapped[list[InvoiceLine]] = relationship(
         back_populates="invoice", cascade="all, delete-orphan", order_by="InvoiceLine.line_no"
     )
 
@@ -118,4 +120,4 @@ class InvoiceLine(UUIDMixin, Base):
     unit_price: Mapped[Decimal] = mapped_column(Price, nullable=False)
     line_net: Mapped[Decimal] = mapped_column(Money, default=ZERO, nullable=False)
 
-    invoice: Mapped["Invoice"] = relationship(back_populates="lines")
+    invoice: Mapped[Invoice] = relationship(back_populates="lines")

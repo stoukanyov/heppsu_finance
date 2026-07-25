@@ -16,13 +16,15 @@ from decimal import Decimal
 from sqlalchemy import (
     Boolean,
     Date,
-    Enum as SAEnum,
     ForeignKey,
     Integer,
     Numeric,
     String,
     UniqueConstraint,
     Uuid,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -94,7 +96,7 @@ class Account(UUIDMixin, TimestampMixin, Base):
     currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    parent: Mapped["Account | None"] = relationship(remote_side="Account.id", backref="children")
+    parent: Mapped[Account | None] = relationship(remote_side="Account.id", backref="children")
 
 
 class FiscalYear(UUIDMixin, TimestampMixin, Base):
@@ -109,7 +111,7 @@ class FiscalYear(UUIDMixin, TimestampMixin, Base):
     end_date: Mapped[dt.date] = mapped_column(Date, nullable=False)
     is_closed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    periods: Mapped[list["AccountingPeriod"]] = relationship(
+    periods: Mapped[list[AccountingPeriod]] = relationship(
         back_populates="fiscal_year", cascade="all, delete-orphan"
     )
 
@@ -131,7 +133,7 @@ class AccountingPeriod(UUIDMixin, TimestampMixin, Base):
         SAEnum(PeriodStatus, native_enum=False, length=20), default=PeriodStatus.OPEN, nullable=False
     )
 
-    fiscal_year: Mapped["FiscalYear"] = relationship(back_populates="periods")
+    fiscal_year: Mapped[FiscalYear] = relationship(back_populates="periods")
 
 
 class JournalEntry(UUIDMixin, TimestampMixin, Base):
@@ -180,12 +182,12 @@ class JournalEntry(UUIDMixin, TimestampMixin, Base):
         Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True
     )
 
-    lines: Mapped[list["JournalLine"]] = relationship(
+    lines: Mapped[list[JournalLine]] = relationship(
         back_populates="entry",
         cascade="all, delete-orphan",
         order_by="JournalLine.line_no",
     )
-    reverses: Mapped["JournalEntry | None"] = relationship(remote_side="JournalEntry.id")
+    reverses: Mapped[JournalEntry | None] = relationship(remote_side="JournalEntry.id")
 
     @property
     def total_debit(self) -> Decimal:
@@ -218,5 +220,5 @@ class JournalLine(UUIDMixin, Base):
 
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
-    entry: Mapped["JournalEntry"] = relationship(back_populates="lines")
-    account: Mapped["Account"] = relationship()
+    entry: Mapped[JournalEntry] = relationship(back_populates="lines")
+    account: Mapped[Account] = relationship()

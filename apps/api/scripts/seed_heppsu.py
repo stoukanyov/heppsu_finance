@@ -21,11 +21,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import engine
+from app.core.security import hash_password
 from app.db import registry  # noqa: F401 — регистрира моделите
 from app.modules.accounting import service as accounting_service
 from app.modules.accounting.schemas import FiscalYearCreate
 from app.modules.companies.models import Company, CompanyRole, Membership
-from app.core.security import hash_password
 from app.modules.identity.models import User
 from app.modules.vat import service as vat_service
 

@@ -38,6 +38,6 @@ class ExportProvider(ABC):
     media_type: str = "application/xml"
 
     @abstractmethod
-    def export(self, company: "Company", context: dict) -> ExportResult:
+    def export(self, company: Company, context: dict) -> ExportResult:
         """Преобразува подадените данни в конкретния формат."""
         raise NotImplementedError

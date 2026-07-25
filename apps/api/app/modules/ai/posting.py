@@ -19,6 +19,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.modules.accounting import service as accounting_service
 from app.modules.accounting.models import (
     Account,
@@ -33,7 +34,6 @@ from app.modules.accounting.schemas import (
     JournalEntryOut,
     JournalLineIn,
 )
-from app.core.config import settings
 from app.modules.ai.llm import get_llm_client
 from app.modules.ai.models import DocumentExtraction, ExpenseClassification
 from app.modules.ai.schemas import ExpenseClassificationOut, PostingProposalOut

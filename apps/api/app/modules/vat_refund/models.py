@@ -20,13 +20,15 @@ from decimal import Decimal
 from sqlalchemy import (
     Boolean,
     Date,
-    Enum as SAEnum,
     ForeignKey,
     Integer,
     Numeric,
     String,
     UniqueConstraint,
     Uuid,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -199,7 +201,7 @@ class VatRefundProcedure(UUIDMixin, TimestampMixin, Base):
         Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
 
-    offsets: Mapped[list["VatRefundOffset"]] = relationship(
+    offsets: Mapped[list[VatRefundOffset]] = relationship(
         back_populates="procedure", cascade="all, delete-orphan",
         order_by="VatRefundOffset.sequence",
     )
@@ -230,4 +232,4 @@ class VatRefundOffset(UUIDMixin, TimestampMixin, Base):
     payable_remaining: Mapped[Decimal] = mapped_column(Money, default=ZERO, nullable=False)  # клетка 71
     refund_remaining_after: Mapped[Decimal] = mapped_column(Money, default=ZERO, nullable=False)
 
-    procedure: Mapped["VatRefundProcedure"] = relationship(back_populates="offsets")
+    procedure: Mapped[VatRefundProcedure] = relationship(back_populates="offsets")

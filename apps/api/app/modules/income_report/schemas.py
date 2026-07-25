@@ -90,7 +90,7 @@ def validate_correction_codes(persons: list[Chl736Person]) -> list[str]:
     for p in persons:
         key = (p.identtype, p.ident, p.ismainemployer)
         seen.setdefault(key, set()).add(p.correctioncode)
-    for (identtype, ident, _main), codes in seen.items():
+    for (_identtype, ident, _main), codes in seen.items():
         if len(codes) > 1:
             errors.append(
                 f"Лице {ident}: в един файл не се допуска смесване на основни/коригиращи/"

@@ -14,11 +14,13 @@ import uuid
 from sqlalchemy import (
     Date,
     DateTime,
-    Enum as SAEnum,
     ForeignKey,
     Integer,
     String,
     Uuid,
+)
+from sqlalchemy import (
+    Enum as SAEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 

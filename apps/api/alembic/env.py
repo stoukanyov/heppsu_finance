@@ -1,19 +1,19 @@
 """Alembic environment — ползва app settings и метаданните на всички модели."""
+import contextlib
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import create_engine
 
+from alembic import context
 from app.core.config import settings
 from app.db import registry  # noqa: F401 — регистрира всички модели в metadata
 from app.db.base import Base
 
 config = context.config
 if config.config_file_name is not None:
-    try:
+    # Логването е незадължително — липсващ или счупен конфиг не бива да спира миграция.
+    with contextlib.suppress(Exception):  # pragma: no cover
         fileConfig(config.config_file_name)
-    except Exception:  # pragma: no cover — логването е незадължително
-        pass
 
 target_metadata = Base.metadata
 

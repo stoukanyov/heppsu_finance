@@ -302,7 +302,7 @@ def correct_extraction(
     history = list(data.get("corrections") or [])
     history.append(
         {
-            "at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "at": dt.datetime.now(dt.UTC).isoformat(),
             "by": str(user_id),
             "fields": sorted(cleaned),
         }

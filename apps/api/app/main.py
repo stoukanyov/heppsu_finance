@@ -7,8 +7,8 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
-from app.core.errors import AccessDeniedError, access_denied_handler
 from app.core.database import engine
+from app.core.errors import AccessDeniedError, access_denied_handler
 from app.db import registry  # noqa: F401 — регистрира всички модели в metadata
 from app.db.base import Base
 
