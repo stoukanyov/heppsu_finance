@@ -3,6 +3,7 @@
 # Деплой на AI Finance OS към среда на сървъра.
 #
 #   ./infra/deploy.sh preprod            # деплой на текущия HEAD към pre-prod
+#   ./infra/deploy.sh demo               # деплой към демо средата (порт 8081)
 #   ./infra/deploy.sh prod v1.0.0        # деплой на конкретен таг към production
 #
 # ПРИНЦИП: деплойва се САМО от git ref (таг или комит), никога от работната
@@ -27,9 +28,15 @@ log()  { printf '\n\033[1;36m▸ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m  ✓ %s\033[0m\n' "$*"; }
 die()  { printf '\n\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
+# Портове и брой работници по среда. `APP_ENV` е стойността на ENVIRONMENT в
+# приложението — тя трябва да е в PRODUCTION_ENVIRONMENTS (config.py), иначе
+# отпада fail-fast проверката на SECRET_KEY. Затова демото също се пише
+# „staging“, макар средата да се казва demo.
 case "$ENV_NAME" in
-    prod|preprod) ;;
-    *) die "употреба: $0 {preprod|prod} [git-ref]" ;;
+    prod)    HTTP_PORT=80;   HTTPS_PORT=443;  WORKERS=4; APP_ENV=production ;;
+    preprod) HTTP_PORT=8080; HTTPS_PORT=8443; WORKERS=2; APP_ENV=staging ;;
+    demo)    HTTP_PORT=8081; HTTPS_PORT=8444; WORKERS=1; APP_ENV=staging ;;
+    *) die "употреба: $0 {preprod|demo|prod} [git-ref]" ;;
 esac
 
 REMOTE_DIR="/srv/aifos/${ENV_NAME}"
@@ -73,7 +80,9 @@ scp -q "$TARBALL" "${HOST}:${REMOTE_DIR}/release.tar.gz"
 
 # ─────────────────── 2. Тайни (само при първо създаване на средата) ───────────
 log "Проверявам .env"
-ssh "$HOST" ENV_NAME="$ENV_NAME" REMOTE_DIR="$REMOTE_DIR" bash -euo pipefail <<'REMOTE'
+ssh "$HOST" ENV_NAME="$ENV_NAME" REMOTE_DIR="$REMOTE_DIR" \
+    HTTP_PORT="$HTTP_PORT" HTTPS_PORT="$HTTPS_PORT" WORKERS="$WORKERS" APP_ENV="$APP_ENV" \
+    bash -euo pipefail <<'REMOTE'
 cd "$REMOTE_DIR"
 # Разархивираме предварително, за да имаме шаблона под ръка.
 rm -rf release.new && mkdir -p release.new
@@ -85,12 +94,10 @@ else
     echo "  създавам .env с нови тайни"
     SECRET=$(openssl rand -base64 48 | tr -d '\n')
     PGPASS=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32)
-    if [ "$ENV_NAME" = "preprod" ]; then HTTP_PORT=8080; HTTPS_PORT=8443; WORKERS=2
-    else                                  HTTP_PORT=80;   HTTPS_PORT=443;  WORKERS=4; fi
     sed -e "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET}|" \
         -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${PGPASS}|" \
         -e "s|^DATABASE_URL=.*|DATABASE_URL=postgresql+psycopg://aifos:${PGPASS}@db:5432/aifos|" \
-        -e "s|^ENVIRONMENT=.*|ENVIRONMENT=${ENV_NAME/preprod/staging}|" \
+        -e "s|^ENVIRONMENT=.*|ENVIRONMENT=${APP_ENV}|" \
         release.new/infra/env.production.example > .env
     {
         echo ""
@@ -156,7 +163,7 @@ REMOTE
 
 # ─────────────────────────── 5. Health gate + връщане назад ───────────────────
 log "Проверявам здравето"
-PORT=$([ "$ENV_NAME" = "prod" ] && echo 80 || echo 8080)
+PORT="$HTTP_PORT"
 HEALTHY=0
 for i in $(seq 1 20); do
     if ssh "$HOST" "curl -fsS --max-time 5 http://127.0.0.1:${PORT}/api/v1/health" 2>/dev/null; then

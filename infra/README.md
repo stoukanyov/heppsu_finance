@@ -8,9 +8,19 @@ Production сървър: Contabo VPS, Ubuntu 24.04 LTS, 6 vCPU / 11 GB RAM / 193
 |---|---|---|---|---|
 | production | `/srv/aifos/prod` | `aifos-prod` | 80 / 443 | `production` |
 | pre-prod | `/srv/aifos/preprod` | `aifos-preprod` | 8080 / 8443 | `staging` |
+| demo | `/srv/aifos/demo` | `aifos-demo` | 8081 / 8444 | `staging` |
 
-Двете среди се вдигат от **един и същ** `docker-compose.yml`. Разликите са само в
+Трите среди се вдигат от **един и същ** `docker-compose.yml`. Разликите са само в
 `.env` — така pre-prod тества точно конфигурацията, която отива в production.
+
+`ENVIRONMENT` на демото е `staging`, а не `demo`: само стойност от
+`PRODUCTION_ENVIRONMENTS` (`config.py`) включва fail-fast проверката, която отказва
+стартиране с `SECRET_KEY` по подразбиране. Демото е публично достъпно и трябва да е
+под същата защита.
+
+**Демо средата не се бекъпва умишлено.** `backup.sh` приема само `prod` и `preprod`.
+Демото съдържа само измислени данни и се пресъздава от нулата всяка нощ — бекъпът му
+би бил само още едно място, където случайно попаднали реални данни оцеляват.
 
 Подредба на всяка среда:
 
@@ -37,6 +47,7 @@ ssh heppsu-deploy    # deploy, стопанин на приложението
 
 ```bash
 ./infra/deploy.sh preprod            # текущият HEAD към pre-prod
+./infra/deploy.sh demo               # текущият HEAD към демо средата
 ./infra/deploy.sh prod v1.0.0        # конкретен таг към production
 ```
 
