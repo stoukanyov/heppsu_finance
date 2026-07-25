@@ -406,6 +406,19 @@
     text-align:center; color:var(--tx-secondary); background:var(--bg-surface-2); transition:.12s; }
   .drop.over { border-color:var(--brand-primary); background:var(--brand-primary-subtle); }
 
+  /* ── Банер за среда: демо и тестовите среди се обявяват видимо ─────────── */
+  :root { --env-banner-h: 0px; }
+  #env-banner { position:fixed; top:0; left:0; right:0; height:36px; z-index:100;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    background:linear-gradient(90deg,#F59E0B,#F0A93C); color:#3B2600;
+    font-size:12.5px; font-weight:700; letter-spacing:.01em;
+    box-shadow:0 1px 4px rgba(20,28,48,.12); }
+  #env-banner svg { width:16px; height:16px; }
+  body:has(#env-banner) { padding-top:36px; }
+  body:has(#env-banner) header.topbar { top:36px; }
+  body:has(#env-banner) aside { height:calc(100vh - 36px); top:36px; }
+  body:has(#env-banner) #rail { top:calc(36px + var(--bar-h) + var(--sp-6)); }
+
   #toast { position:fixed; bottom:24px; right:24px; max-width:400px; z-index:90; }
   .toast { background:var(--tx-primary); color:#fff; padding:12px 16px; border-radius:var(--r-md);
     box-shadow:var(--sh-modal); margin-top:10px; display:flex; gap:10px; align-items:center;
@@ -996,6 +1009,23 @@ async function newCompany(){ const name=prompt('Име на дружествот
   }catch(e){ toast(e.message,true); } }
 
 /* ---------- boot ---------- */
+/* Демо и тестовите среди се обявяват видимо, за да не се сбъркат с production.
+   Разпознаването е по PROJECT_NAME от /health, а не по ENVIRONMENT: демото се
+   пуска с ENVIRONMENT=staging, защото само тази стойност включва fail-fast
+   проверката на SECRET_KEY (виж config.py). */
+async function showEnvBanner(){
+  let h; try{ h=await api('/health'); }catch{ return; }
+  const name=String(h.service||'');
+  const isDemo=/демо|demo/i.test(name);
+  if(!isDemo && h.environment==='production') return;
+  const txt = isDemo
+    ? 'ДЕМО СРЕДА — всички данни са измислени и се изтриват всяка нощ'
+    : `ТЕСТОВА СРЕДА (${esc(h.environment||'?')}) — това не е production`;
+  const bar = el(`<div id="env-banner">${ic('alert')}<span>${esc(txt)}</span></div>`);
+  document.body.insertBefore(bar, document.body.firstChild);
+  document.documentElement.style.setProperty('--env-banner-h','36px');
+}
+
 async function boot(){
   try{
     me=await api('/auth/me');
@@ -2294,6 +2324,7 @@ async function viewAudit(main){
 }
 
 /* ---------- start ---------- */
+showEnvBanner();
 if(token) boot(); else document.getElementById('auth').style.display='grid';
 window.addEventListener('hashchange',()=>{ const v=location.hash.replace('#',''); if(v&&v!==currentView&&companyId) navigate(v); });
 </script>
