@@ -1,7 +1,7 @@
 """API рутер за банковия модул (tenant-scoped)."""
 import uuid
 
-from fastapi import APIRouter, File, Form, UploadFile, status
+from fastapi import APIRouter, File, Form, Query, UploadFile, status
 
 from app.api.deps import CurrentCompany, DbSession, require
 from app.modules.banking import service
@@ -9,12 +9,15 @@ from app.modules.banking.models import BankTxStatus
 from app.modules.banking.schemas import (
     BankAccountCreate,
     BankAccountOut,
+    BankConnectionOut,
     BankTransactionOut,
     ImportRequest,
     ImportResult,
+    LinkAccountsIn,
     MatchOut,
     MatchRequest,
     MatchSuggestion,
+    StartConnectionIn,
 )
 
 router = APIRouter(prefix="/banking", tags=["banking"])
@@ -122,3 +125,70 @@ def unmatch_transaction(
 @router.post("/transactions/{tx_id}/ignore", response_model=BankTransactionOut, dependencies=[require("banking.reconcile")])
 def ignore_transaction(tx_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> BankTransactionOut:
     return BankTransactionOut.model_validate(service.ignore_transaction(db, ctx.company.id, tx_id))
+
+
+# ---------------------------------------------------------------- open banking (PSD2)
+@router.get("/providers", dependencies=[require("banking.view")])
+def bank_providers() -> dict:
+    """Кои доставчици на банкови данни са налични и кой се ползва."""
+    return service.list_bank_providers()
+
+
+@router.get("/institutions", dependencies=[require("banking.view")])
+def institutions(
+    ctx: CurrentCompany,
+    country: str = Query(default="BG", min_length=2, max_length=2),
+    provider: str | None = Query(default=None),
+) -> list[dict]:
+    """Банките, които доставчикът поддържа за държавата."""
+    return service.list_institutions(country, provider)
+
+
+@router.post("/connections", response_model=BankConnectionOut,
+             status_code=status.HTTP_201_CREATED, dependencies=[require("banking.import")])
+def start_connection(
+    data: StartConnectionIn, ctx: CurrentCompany, db: DbSession
+) -> BankConnectionOut:
+    """Започва съгласие по PSD2 — връща линк за удостоверяване пред банката."""
+    connection = service.start_connection(
+        db, ctx.company, data.institution_id, str(data.redirect_url),
+        ctx.membership.user_id, data.provider,
+    )
+    return BankConnectionOut.model_validate(connection)
+
+
+@router.get("/connections", response_model=list[BankConnectionOut],
+            dependencies=[require("banking.view")])
+def list_connections(ctx: CurrentCompany, db: DbSession) -> list[BankConnectionOut]:
+    return [
+        BankConnectionOut.model_validate(c) for c in service.list_connections(db, ctx.company.id)
+    ]
+
+
+@router.get("/connections/{connection_id}/remote-accounts", dependencies=[require("banking.view")])
+def remote_accounts(connection_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> list[dict]:
+    """Сметките, до които съгласието дава достъп — за да се свържат с местните."""
+    return service.remote_accounts(db, ctx.company.id, connection_id)
+
+
+@router.post("/connections/{connection_id}/link-accounts", dependencies=[require("banking.import")])
+def link_accounts(
+    connection_id: uuid.UUID, data: LinkAccountsIn, ctx: CurrentCompany, db: DbSession
+) -> dict:
+    links = service.link_accounts(db, ctx.company, connection_id, data.mapping)
+    return {"linked": len(links)}
+
+
+@router.post("/connections/{connection_id}/sync", dependencies=[require("banking.import")])
+def sync_connection(
+    connection_id: uuid.UUID, ctx: CurrentCompany, db: DbSession,
+    days_back: int = Query(default=30, ge=1, le=730),
+) -> dict:
+    """Изтегля движенията и ги внася през същия път като файловия импорт."""
+    return service.sync_connection(db, ctx.company, connection_id, days_back)
+
+
+@router.get("/consent-warnings", dependencies=[require("banking.view")])
+def consent_warnings(ctx: CurrentCompany, db: DbSession) -> list[dict]:
+    """Съгласия, които изтичат скоро или вече са изтекли."""
+    return service.consent_warnings(db, ctx.company.id)

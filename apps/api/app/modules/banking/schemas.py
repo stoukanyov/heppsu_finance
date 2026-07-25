@@ -89,3 +89,29 @@ class MatchOut(BaseModel):
     amount: Decimal
     confidence: Decimal
     auto: bool
+
+
+# ---------------------------------------------------------------- open banking
+class StartConnectionIn(BaseModel):
+    institution_id: str = Field(min_length=1, max_length=100)
+    redirect_url: str = Field(min_length=1, max_length=1000)
+    provider: str | None = Field(default=None, max_length=30)
+
+
+class LinkAccountsIn(BaseModel):
+    """external_account_id → id на местната банкова сметка."""
+
+    mapping: dict[str, uuid.UUID] = Field(min_length=1)
+
+
+class BankConnectionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    provider_code: str
+    institution_id: str
+    institution_name: str | None
+    status: str
+    consent_link: str | None
+    expires_at: dt.datetime | None
+    last_synced_at: dt.datetime | None

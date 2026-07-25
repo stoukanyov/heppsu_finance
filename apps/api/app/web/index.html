@@ -1474,10 +1474,13 @@ async function viewPurchases(main){
 /* ==================== БАНКИ ==================== */
 async function viewBanking(main){
   const accs=await api('/banking/accounts');
-  main.innerHTML=pageH('Банки и каси','Импорт на извлечения и съпоставяне')+`
+  main.innerHTML=pageH('Банки и каси','Свързване с банката, импорт на извлечения и съпоставяне')+`
+    <div id="ob-warn"></div>
     <div class="card" style="margin-bottom:16px;"><div class="row">
       <div class="field grow"><label>Нова банкова сметка</label><input id="ba-name" placeholder="напр. Разплащателна EUR" /></div>
-      <button id="ba-add" class="primary">${ic('plus')}Създай</button></div></div>
+      <button id="ba-add" class="primary">${ic('plus')}Създай</button>
+      ${accs.length?`<button id="ob-open">${ic('globe')}Свържи с банка (PSD2)</button>`:''}</div></div>
+    <div id="ob-box"></div>
     ${accs.length?`
     <div class="cols" style="margin-bottom:16px;">
       <div class="card"><h3 style="margin-bottom:14px;">Ръчно движение</h3>
@@ -1501,6 +1504,9 @@ async function viewBanking(main){
     <div class="card"><div class="card-t"><h3>Движения</h3></div><div id="tx-list">${loading()}</div></div>`
     :`<div class="card">${empty('Създай банкова сметка, за да импортираш движения.')}</div>`}
     <div id="match-box"></div>`;
+  obWarnings();
+  const obBtn=document.getElementById('ob-open');
+  if(obBtn) obBtn.onclick=()=>obPanel(accs);
   document.getElementById('ba-add').onclick=async()=>{ const name=document.getElementById('ba-name').value.trim(); if(!name) return;
     try{ await api('/banking/accounts',{method:'POST',body:{name}}); toast('Сметката е създадена'); viewBanking(main); }catch(e){ toast(e.message,true); } };
   if(accs.length){
@@ -2465,6 +2471,102 @@ async function prRateSetForm(existing){
           if(existing) await api(`/payroll/rate-sets/${existing.id}`,{method:'PATCH',body});
           else await api('/payroll/rate-sets',{method:'POST',body});
           closeModal(); toast('Параметрите са запазени'); navigate('payroll');
+        }catch(e){ toast(e.message,true); } };
+    }});
+}
+
+/* ---------- Open banking (PSD2) ---------- */
+/* Удостоверяването е при самата банка — през системата не минават банкови пароли. */
+const OB_ST={PENDING:'s-amber',ACTIVE:'s-green',EXPIRED:'s-red',REVOKED:'s-gray'};
+const OB_ST_BG={PENDING:'чака удостоверяване',ACTIVE:'активно',EXPIRED:'изтекло',REVOKED:'оттеглено'};
+
+async function obWarnings(){
+  const box=document.getElementById('ob-warn'); if(!box) return;
+  let rows=[]; try{ rows=await api('/banking/consent-warnings'); }catch{ return; }
+  if(!rows.length){ box.innerHTML=''; return; }
+  box.innerHTML=rows.map(w=>`<div class="card" style="margin-bottom:12px;border-color:var(--${w.level==='ERROR'?'bad':'warn'});">
+    <div class="flex">${ic('alert')}<b>${esc(w.institution)}</b><span>${esc(w.message)}</span></div></div>`).join('');
+}
+
+async function obPanel(accounts){
+  const box=document.getElementById('ob-box'); if(!box) return;
+  box.innerHTML=loading();
+  let providers, connections;
+  try{ [providers,connections]=await Promise.all([api('/banking/providers'),api('/banking/connections')]); }
+  catch(e){ box.innerHTML=`<div class="card">${empty(e.message)}</div>`; return; }
+
+  box.innerHTML=`<div class="card" style="margin-bottom:16px;">
+    <div class="card-t"><h3>Свързване с банка (PSD2)</h3>
+      <span class="pill s-violet na">${esc(providers.active)}</span></div>
+    <div class="hint" style="margin-bottom:12px;">${esc(providers.note)}
+      Съгласието е срочно — при изтичане тегленето спира и системата предупреждава предварително.</div>
+    <div class="row">
+      <div class="field grow"><label>Банка</label><select id="ob-inst"><option>зареждане…</option></select></div>
+      <button id="ob-start" class="primary" style="align-self:flex-end;">${ic('globe')}Поискай съгласие</button>
+    </div></div>
+    ${connections.length?`<div class="card"><div class="card-t"><h3>Връзки</h3><span class="pill s-gray na">${connections.length}</span></div>
+      <table><thead><tr><th>Банка</th><th>Статус</th><th>Изтича</th><th>Последно теглене</th><th class="num"></th></tr></thead><tbody>
+      ${connections.map(c=>`<tr><td class="strong">${esc(c.institution_name||c.institution_id)}</td>
+        <td><span class="pill ${OB_ST[c.status]}">${esc(OB_ST_BG[c.status]||c.status)}</span></td>
+        <td>${c.expires_at?esc(c.expires_at.slice(0,10)):'<span class="muted-2">—</span>'}</td>
+        <td>${c.last_synced_at?esc(c.last_synced_at.slice(0,16).replace('T',' ')):'<span class="muted-2">никога</span>'}</td>
+        <td class="num">${c.status==='PENDING'&&c.consent_link?`<a class="sm" href="${esc(c.consent_link)}" target="_blank" rel="noopener">Удостоверяване</a> `:''}
+          <button class="sm ob-link" data-id="${c.id}">Свържи сметки</button>
+          <button class="sm ob-sync" data-id="${c.id}">Изтегли движения</button></td></tr>`).join('')}
+      </tbody></table></div>`:''}
+    <div id="ob-detail"></div>`;
+
+  const sel=document.getElementById('ob-inst');
+  try{
+    const list=await api('/banking/institutions?country=BG');
+    sel.innerHTML=list.map(i=>`<option value="${esc(i.id)}">${esc(i.name)}</option>`).join('')
+      || '<option value="">няма налични банки</option>';
+  }catch(e){ sel.innerHTML=`<option value="">${esc(e.message)}</option>`; }
+
+  document.getElementById('ob-start').onclick=async(e)=>{
+    const inst=sel.value; if(!inst){ toast('Избери банка',true); return; }
+    const b=e.currentTarget; b.disabled=true;
+    try{ const c=await api('/banking/connections',{method:'POST',body:{
+          institution_id:inst, redirect_url:location.origin+'/app/#banking'}});
+      toast('Съгласието е започнато — отвори линка, за да се удостовериш пред банката');
+      if(c.consent_link) window.open(c.consent_link,'_blank','noopener');
+      obPanel(accounts);
+    }catch(err){ toast(err.message,true); b.disabled=false; } };
+
+  box.querySelectorAll('.ob-link').forEach(b=>b.onclick=()=>obLinkAccounts(b.dataset.id, accounts));
+  box.querySelectorAll('.ob-sync').forEach(b=>b.onclick=async()=>{
+    b.disabled=true; b.textContent='Тегли…';
+    try{ const r=await api(`/banking/connections/${b.dataset.id}/sync?days_back=90`,{method:'POST'});
+      toast(`Внесени ${r.imported}, дубликати ${r.duplicates}`);
+      if(r.warnings.length) r.warnings.forEach(w=>toast(w,true));
+      navigate('banking');
+    }catch(e){ toast(e.message,true); b.disabled=false; b.textContent='Изтегли движения'; } });
+}
+
+async function obLinkAccounts(connectionId, accounts){
+  let remote=[];
+  try{ remote=await api(`/banking/connections/${connectionId}/remote-accounts`); }
+  catch(e){ toast(e.message,true); return; }
+  if(!remote.length){ toast('Няма достъпни сметки — довърши удостоверяването пред банката',true); return; }
+
+  openModal({title:'Свързване на сметки', size:'lg',
+    subtitle:'Коя сметка при банката отговаря на коя сметка тук.',
+    body:`<table><thead><tr><th>Сметка при банката</th><th>IBAN</th><th>Тук</th></tr></thead><tbody>
+      ${remote.map(r=>`<tr><td class="strong">${esc(r.name||r.external_id)}</td>
+        <td class="muted">${esc(r.iban||'—')}</td>
+        <td><select class="ob-map" data-ext="${esc(r.external_id)}">
+          <option value="">— не свързвай —</option>
+          ${accounts.map(a=>`<option value="${a.id}">${esc(a.name)} (${esc(a.currency)})</option>`).join('')}
+        </select></td></tr>`).join('')}</tbody></table>`,
+    footer:`<button data-close-btn>Откажи</button><button class="primary" id="ob-map-save">Свържи</button>`,
+    onOpen:(bd)=>{
+      bd.querySelector('[data-close-btn]').onclick=closeModal;
+      bd.querySelector('#ob-map-save').onclick=async()=>{
+        const mapping={};
+        bd.querySelectorAll('.ob-map').forEach(s=>{ if(s.value) mapping[s.dataset.ext]=s.value; });
+        if(!Object.keys(mapping).length){ toast('Избери поне една сметка',true); return; }
+        try{ const r=await api(`/banking/connections/${connectionId}/link-accounts`,{method:'POST',body:{mapping}});
+          closeModal(); toast(`Свързани ${r.linked} сметки`); navigate('banking');
         }catch(e){ toast(e.message,true); } };
     }});
 }

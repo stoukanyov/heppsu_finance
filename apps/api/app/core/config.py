@@ -116,6 +116,10 @@ class Settings(BaseSettings):
     APPLE_PRIVATE_KEY_PATH: str = ""   # път до AuthKey_XXXX.p8
     APPLE_VENDOR_NUMBER: str = ""      # номер на доставчика (за Sales Reports)
     # Google Play: финансовите отчети се експортират в Google Cloud Storage bucket.
+    # Банки (PSD2 / open banking). Ключовете се четат само от средата (D-009).
+    GOCARDLESS_SECRET_ID: str = ""
+    GOCARDLESS_SECRET_KEY: str = ""
+
     GOOGLE_PLAY_BUCKET: str = ""       # напр. pubsite_prod_..._<developer id>
     GOOGLE_APPLICATION_CREDENTIALS: str = ""  # път до service account JSON
 

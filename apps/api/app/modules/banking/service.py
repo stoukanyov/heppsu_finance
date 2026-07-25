@@ -456,3 +456,290 @@ def ignore_transaction(db: Session, company_id: uuid.UUID, tx_id: uuid.UUID) -> 
     db.commit()
     db.refresh(tx)
     return tx
+
+
+# ============================ Open banking (PSD2) ============================
+def _as_aware(value):
+    """Привежда дата към UTC-осъзната.
+
+    SQLite не пази часова зона и връща naive дати, а PostgreSQL връща aware.
+    Сравнение между двете вдига TypeError — грешка, която минава в dev и се
+    появява чак в production. Затова нормализираме на едно място (виж D-003).
+    """
+    import datetime as dt
+
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=dt.UTC)
+
+
+def _connector(code: str | None = None):
+    from app.modules.banking.connectors.factory import get_bank_connector
+
+    return get_bank_connector(code)
+
+
+def list_bank_providers() -> dict:
+    """Кои доставчици са налични и кой ще се ползва."""
+    from app.modules.banking.connectors.factory import available_bank_connectors
+
+    active = _connector()
+    return {
+        "active": active.code,
+        "providers": [
+            {
+                "code": c.code,
+                "name": c.name,
+                "available": c.available,
+                "requires_consent_renewal": c.requires_consent_renewal,
+            }
+            for c in available_bank_connectors()
+        ],
+        "note": (
+            "Удостоверяването е при самата банка — през системата не минават банкови "
+            "пароли. Пази се само идентификаторът на съгласието при доставчика."
+        ),
+    }
+
+
+def list_institutions(country: str = "BG", provider: str | None = None) -> list[dict]:
+    connector = _connector(provider)
+    try:
+        rows = connector.list_institutions(country)
+    except RuntimeError as exc:
+        raise _err(str(exc), status.HTTP_503_SERVICE_UNAVAILABLE) from exc
+    return [
+        {"id": i.external_id, "name": i.name, "country": i.country,
+         "logo": i.logo, "max_consent_days": i.max_consent_days}
+        for i in rows
+    ]
+
+
+def start_connection(
+    db: Session,
+    company: Company,
+    institution_id: str,
+    redirect_url: str,
+    user_id: uuid.UUID,
+    provider: str | None = None,
+):
+    """Започва съгласие: връща линк, който потребителят отваря пред банката си."""
+    from app.modules.banking.models import BankConnection, BankConnectionStatus
+
+    connector = _connector(provider)
+    try:
+        session = connector.start_consent(institution_id, redirect_url)
+    except RuntimeError as exc:
+        raise _err(str(exc), status.HTTP_503_SERVICE_UNAVAILABLE) from exc
+
+    connection = BankConnection(
+        company_id=company.id,
+        provider_code=connector.code,
+        institution_id=institution_id,
+        institution_name=session.institution_name,
+        external_id=session.external_id,
+        consent_link=session.link,
+        expires_at=session.expires_at,
+        status=BankConnectionStatus.PENDING,
+        created_by_id=user_id,
+    )
+    db.add(connection)
+    db.commit()
+    db.refresh(connection)
+    return connection
+
+
+def list_connections(db: Session, company_id: uuid.UUID) -> list:
+    from app.modules.banking.models import BankConnection
+
+    return list(
+        db.scalars(
+            select(BankConnection)
+            .where(BankConnection.company_id == company_id)
+            .order_by(BankConnection.created_at.desc())
+        )
+    )
+
+
+def _get_connection(db: Session, company_id: uuid.UUID, connection_id: uuid.UUID):
+    from app.modules.banking.models import BankConnection
+
+    connection = db.get(BankConnection, connection_id)
+    if connection is None or connection.company_id != company_id:
+        raise _err("Връзката с банка не е намерена", status.HTTP_404_NOT_FOUND)
+    return connection
+
+
+def link_accounts(
+    db: Session, company: Company, connection_id: uuid.UUID, mapping: dict[str, uuid.UUID]
+) -> list:
+    """Свързва отдалечените сметки с местните. `mapping`: external_account_id → account_id."""
+    from app.modules.banking.models import (
+        BankAccountLink,
+        BankConnectionStatus,
+    )
+
+    connection = _get_connection(db, company.id, connection_id)
+    connector = _connector(connection.provider_code)
+    try:
+        remote = {a.external_id: a for a in connector.list_accounts(connection.external_id)}
+    except RuntimeError as exc:
+        raise _err(str(exc), status.HTTP_503_SERVICE_UNAVAILABLE) from exc
+
+    created = []
+    for external_id, account_id in mapping.items():
+        if external_id not in remote:
+            raise _err(f"Сметка {external_id} не е достъпна с това съгласие")
+        _get_account(db, company.id, account_id)
+        existing = db.scalar(
+            select(BankAccountLink).where(
+                BankAccountLink.connection_id == connection.id,
+                BankAccountLink.external_account_id == external_id,
+            )
+        )
+        if existing is not None:
+            existing.account_id = account_id
+            created.append(existing)
+            continue
+        link = BankAccountLink(
+            company_id=company.id,
+            connection_id=connection.id,
+            account_id=account_id,
+            external_account_id=external_id,
+            remote_iban=remote[external_id].iban,
+            remote_name=remote[external_id].name,
+        )
+        db.add(link)
+        created.append(link)
+
+    connection.status = BankConnectionStatus.ACTIVE
+    db.commit()
+    for link in created:
+        db.refresh(link)
+    return created
+
+
+def remote_accounts(db: Session, company_id: uuid.UUID, connection_id: uuid.UUID) -> list[dict]:
+    connection = _get_connection(db, company_id, connection_id)
+    connector = _connector(connection.provider_code)
+    try:
+        rows = connector.list_accounts(connection.external_id)
+    except RuntimeError as exc:
+        raise _err(str(exc), status.HTTP_503_SERVICE_UNAVAILABLE) from exc
+    return [
+        {"external_id": a.external_id, "iban": a.iban, "name": a.name,
+         "currency": a.currency, "owner_name": a.owner_name}
+        for a in rows
+    ]
+
+
+def sync_connection(
+    db: Session, company: Company, connection_id: uuid.UUID, days_back: int = 30
+) -> dict:
+    """Изтегля движенията по всички свързани сметки и ги внася през общия път.
+
+    Дедупликацията и автоматичното съпоставяне са същите, както при файловия импорт —
+    затова повторното пускане не създава дубликати.
+    """
+    import datetime as dt
+
+    from app.modules.banking.models import BankAccountLink, BankConnectionStatus
+
+    connection = _get_connection(db, company.id, connection_id)
+    if connection.status == BankConnectionStatus.EXPIRED:
+        raise _err(
+            "Съгласието по PSD2 е изтекло. Поднови го, за да продължи тегленето на движения.",
+            status.HTTP_409_CONFLICT,
+        )
+
+    now = dt.datetime.now(dt.UTC)
+    expires_at = _as_aware(connection.expires_at)
+    if expires_at is not None and expires_at <= now:
+        connection.status = BankConnectionStatus.EXPIRED
+        db.commit()
+        raise _err(
+            "Съгласието по PSD2 изтече. Поднови го, за да продължи тегленето на движения.",
+            status.HTTP_409_CONFLICT,
+        )
+
+    links = list(
+        db.scalars(
+            select(BankAccountLink).where(BankAccountLink.connection_id == connection.id)
+        )
+    )
+    if not links:
+        raise _err("Няма свързани сметки — избери коя отдалечена сметка на коя местна отговаря")
+
+    connector = _connector(connection.provider_code)
+    date_to = dt.date.today()
+    date_from = date_to - dt.timedelta(days=max(1, min(days_back, 730)))
+
+    imported = duplicates = 0
+    warnings: list[str] = []
+    for link in links:
+        try:
+            result = connector.fetch_transactions(link.external_account_id, date_from, date_to)
+        except RuntimeError as exc:
+            warnings.append(f"{link.remote_name or link.external_account_id}: {exc}")
+            continue
+        warnings.extend(result.warnings)
+        if not result.transactions:
+            continue
+        outcome = import_transactions(db, company, link.account_id, result.transactions)
+        imported += outcome.imported
+        duplicates += outcome.duplicates
+
+    connection.last_synced_at = now
+    db.commit()
+    return {
+        "connection_id": connection.id,
+        "date_from": date_from,
+        "date_to": date_to,
+        "accounts": len(links),
+        "imported": imported,
+        "duplicates": duplicates,
+        "warnings": warnings,
+    }
+
+
+def consent_warnings(db: Session, company_id: uuid.UUID) -> list[dict]:
+    """Съгласия, които изтичат скоро или вече са изтекли.
+
+    Изтеклото съгласие спира тегленето тихо — предупреждението е точката, в която
+    това престава да е изненада.
+    """
+    import datetime as dt
+
+    from app.modules.banking.models import BankConnection, BankConnectionStatus
+
+    now = dt.datetime.now(dt.UTC)
+    soon = now + dt.timedelta(days=7)
+    rows = db.scalars(
+        select(BankConnection).where(
+            BankConnection.company_id == company_id,
+            BankConnection.status.in_(
+                (BankConnectionStatus.ACTIVE, BankConnectionStatus.EXPIRED)
+            ),
+        )
+    )
+    warnings: list[dict] = []
+    for connection in rows:
+        if connection.status == BankConnectionStatus.EXPIRED:
+            warnings.append({
+                "connection_id": connection.id,
+                "institution": connection.institution_name or connection.institution_id,
+                "level": "ERROR",
+                "message": "Съгласието е изтекло — движенията не се теглят. Поднови го.",
+            })
+        else:
+            expires_at = _as_aware(connection.expires_at)
+            if expires_at is None or expires_at > soon:
+                continue
+            days = max(0, (expires_at - now).days)
+            warnings.append({
+                "connection_id": connection.id,
+                "institution": connection.institution_name or connection.institution_id,
+                "level": "WARNING",
+                "message": f"Съгласието изтича след {days} дни — поднови го предварително.",
+            })
+    return warnings
