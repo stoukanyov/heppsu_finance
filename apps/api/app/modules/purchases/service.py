@@ -1,4 +1,5 @@
 """Бизнес логика за получени фактури (AP): чернова, осчетоводяване, ДДС."""
+import datetime as dt
 import uuid
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -196,3 +197,95 @@ def cancel_purchase(db: Session, company_id: uuid.UUID, invoice_id: uuid.UUID) -
     db.commit()
     db.refresh(inv)
     return inv
+
+
+def import_ubl(
+    db: Session, company: Company, user_id: uuid.UUID, xml: bytes, *,
+    vat_code_id: uuid.UUID | None = None, expense_account_id: uuid.UUID | None = None,
+) -> dict:
+    """Чете входяща e-фактура (EN 16931 / UBL) и подготвя чернова покупка.
+
+    Замества OCR: когато доставчикът прати структуриран документ, няма какво да се
+    разпознава — данните вече са машинни и не искат проверка на разчитането.
+
+    Доставчикът се търси по ЕИК и по ДДС номер. Ако не съществува, **не се създава
+    мълчаливо**: връща се какво е прочетено и ясно указание какво липсва, защото
+    автоматично създаден контрагент от чужд файл е тих източник на дубликати.
+    """
+    from app.modules.purchases.schemas import PurchaseCreate, PurchaseLineIn
+    from app.tax_engine.export.registry import get_export_provider
+    from app.tax_engine.export.ubl import parse_ubl
+
+    provider = get_export_provider("UBL_BIS")
+    report = provider.validate(xml)
+    if not report.ok:
+        raise _err(
+            "Файлът не отговаря на EN 16931: " + "; ".join(i.message for i in report.errors[:5])
+        )
+
+    try:
+        parsed = parse_ubl(xml)
+    except Exception as exc:
+        raise _err(f"Файлът не може да се прочете: {exc}") from exc
+
+    supplier = None
+    if parsed["supplier_eik"]:
+        supplier = db.scalar(
+            select(Counterparty).where(
+                Counterparty.company_id == company.id,
+                Counterparty.eik == parsed["supplier_eik"],
+            )
+        )
+    if supplier is None and parsed["supplier_vat_number"]:
+        supplier = db.scalar(
+            select(Counterparty).where(
+                Counterparty.company_id == company.id,
+                Counterparty.vat_number == parsed["supplier_vat_number"],
+            )
+        )
+
+    if supplier is None:
+        return {
+            "created": False,
+            "reason": (
+                f"Доставчикът „{parsed['supplier_name'] or '—'}“ "
+                f"(ЕИК {parsed['supplier_eik'] or '—'}) не е в регистъра на контрагентите. "
+                f"Добави го и повтори импорта."
+            ),
+            "parsed": parsed,
+            "warnings": [i.message for i in report.warnings],
+        }
+
+    purchase = create_purchase(
+        db, company, user_id,
+        PurchaseCreate(
+            counterparty_id=supplier.id,
+            supplier_document_number=parsed["document_number"] or "БЕЗ НОМЕР",
+            document_date=parsed["issue_date"] or dt.date.today(),
+            due_date=parsed["due_date"],
+            currency=parsed["currency"],
+            vat_code_id=vat_code_id,
+            expense_account_id=expense_account_id,
+            notes=parsed["notes"],
+            lines=[
+                PurchaseLineIn(
+                    description=line["description"],
+                    quantity=line["quantity"],
+                    unit_price=line["unit_price"],
+                )
+                for line in parsed["lines"]
+            ],
+        ),
+    )
+    return {
+        "created": True,
+        "purchase_id": purchase.id,
+        "supplier": supplier.name,
+        "document_number": parsed["document_number"],
+        "total_in_file": str(parsed["total"]),
+        "warnings": [i.message for i in report.warnings],
+        "note": (
+            "Черновата е създадена от структурирани данни — без OCR и без проверка на "
+            "разчитането. Провери ДДС кода и разходната сметка преди осчетоводяване."
+        ),
+    }

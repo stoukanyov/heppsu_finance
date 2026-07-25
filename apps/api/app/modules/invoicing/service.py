@@ -218,3 +218,42 @@ def cancel_invoice(db: Session, company_id: uuid.UUID, invoice_id: uuid.UUID) ->
     db.commit()
     db.refresh(inv)
     return inv
+
+
+def build_ubl(db: Session, company: Company, invoice_id: uuid.UUID):
+    """Сглобява електронната фактура през export регистъра (versioned provider)."""
+    from app.modules.counterparties.models import Counterparty
+    from app.modules.vat.models import VatCode
+    from app.tax_engine.export.registry import get_export_provider
+    from app.tax_engine.export.ubl import (
+        TYPE_CREDIT_NOTE,
+        TYPE_DEBIT_NOTE,
+        TYPE_INVOICE,
+    )
+
+    invoice = get_invoice(db, company.id, invoice_id)
+    counterparty = db.get(Counterparty, invoice.counterparty_id)
+    if counterparty is None:
+        raise _err("Контрагентът по фактурата не е намерен", status.HTTP_404_NOT_FOUND)
+
+    vat_rate = ZERO
+    if invoice.vat_code_id is not None:
+        code = db.get(VatCode, invoice.vat_code_id)
+        if code is not None:
+            vat_rate = code.rate
+
+    type_code = {
+        InvoiceType.CREDIT_NOTE: TYPE_CREDIT_NOTE,
+        InvoiceType.DEBIT_NOTE: TYPE_DEBIT_NOTE,
+    }.get(invoice.invoice_type, TYPE_INVOICE)
+
+    provider = get_export_provider("UBL_BIS")
+    return provider.export(
+        company,
+        {
+            "invoice": invoice,
+            "counterparty": counterparty,
+            "vat_rate": vat_rate,
+            "document_type_code": type_code,
+        },
+    )

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from app.tax_engine.export.base import ExportProvider
 from app.tax_engine.export.saft import SaftBgV1Provider
+from app.tax_engine.export.ubl import UblBisBillingProvider
 
 _PROVIDERS: dict[tuple[str, str], ExportProvider] = {}
 _LATEST: dict[str, ExportProvider] = {}
@@ -36,3 +37,4 @@ def available_export_providers() -> list[ExportProvider]:
 
 
 register(SaftBgV1Provider())
+register(UblBisBillingProvider())

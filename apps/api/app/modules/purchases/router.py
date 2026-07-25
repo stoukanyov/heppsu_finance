@@ -1,7 +1,8 @@
 """API рутер за получени фактури (AP, tenant-scoped)."""
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.api.deps import CurrentCompany, DbSession, require
 from app.modules.purchases import service
@@ -35,3 +36,21 @@ def post_purchase(invoice_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> 
 @router.post("/{invoice_id}/cancel", response_model=PurchaseOut, dependencies=[require("purchases.create")])
 def cancel_purchase(invoice_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> PurchaseOut:
     return PurchaseOut.model_validate(service.cancel_purchase(db, ctx.company.id, invoice_id))
+
+
+@router.post("/import-ubl", dependencies=[require("purchases.create")])
+def import_ubl(
+    ctx: CurrentCompany,
+    db: DbSession,
+    file: Annotated[UploadFile, File()],
+    vat_code_id: Annotated[uuid.UUID | None, Form()] = None,
+    expense_account_id: Annotated[uuid.UUID | None, Form()] = None,
+) -> dict:
+    """Импорт на входяща електронна фактура (EN 16931 / UBL) като чернова покупка."""
+    content = file.file.read(5 * 1024 * 1024 + 1)
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Файлът е над 5 MB")
+    return service.import_ubl(
+        db, ctx.company, ctx.membership.user_id, content,
+        vat_code_id=vat_code_id, expense_account_id=expense_account_id,
+    )
