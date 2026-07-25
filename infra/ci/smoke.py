@@ -5,10 +5,15 @@
 този контейнер, с точно тази база и точно този nginx, върши реална работа —
 хващат счупен .env, недостъпна база, объркан reverse proxy, липсваща миграция.
 
-    python infra/ci/smoke.py http://127.0.0.1:8080
+    python infra/ci/smoke.py http://127.0.0.1:8080              # пълни
+    python infra/ci/smoke.py https://... --read-only            # само четящи
+
+ВАЖНО за production: пълните проверки СЪЗДАВАТ дружество, сметкоплан и
+счетоводни операции. В production това означава фиктивни записи в реална
+счетоводна база — недопустимо. Затова там се пуска `--read-only`, който само
+чете и проверява, че защитата работи.
 
 Изход: 0 = всичко минава, 1 = има провал.
-Тестовете създават собствено дружество с уникален имейл и не пипат чужди данни.
 """
 from __future__ import annotations
 
@@ -61,7 +66,7 @@ def check(name: str):
     return wrap
 
 
-def main(base: str) -> int:
+def main(base: str, read_only: bool = False) -> int:
     base = base.rstrip("/")
     api = base + "/api/v1"
     stamp = int(time.time())
@@ -69,7 +74,8 @@ def main(base: str) -> int:
     password = "smoke-test-password-1"
     state: dict = {}
 
-    print(f"\n\033[1;36m▸ Smoke тестове срещу {base}\033[0m\n")
+    mode = "само четящи" if read_only else "пълни"
+    print(f"\n\033[1;36m▸ Smoke тестове срещу {base} ({mode})\033[0m\n")
 
     @check("приложението отговаря (/health)")
     def _():
@@ -95,20 +101,39 @@ def main(base: str) -> int:
     def _():
         call(api, "/companies", expect=401)
 
-    @check("регистрация и вход")
-    def _():
-        call(api, "/auth/register", method="POST",
-             body={"email": email, "password": password, "full_name": "Smoke Тест"},
-             expect=201)
-        _, d = call(api, "/auth/login", method="POST",
-                    body={"email": email, "password": password}, expect=200)
-        assert d.get("access_token"), d
-        state["token"] = d["access_token"]
-
-    @check("грешна парола не пуска")
+    @check("несъществуващ потребител не влиза")
     def _():
         call(api, "/auth/login", method="POST",
-             body={"email": email, "password": "грешна"}, expect=401)
+             body={"email": f"nobody-{stamp}@example.com", "password": "каквото и да е"},
+             expect=401)
+
+    # Регистрацията създава запис — в production се прескача.
+    if not read_only:
+        @check("регистрация и вход")
+        def _():
+            call(api, "/auth/register", method="POST",
+                 body={"email": email, "password": password, "full_name": "Smoke Тест"},
+                 expect=201)
+            _, d = call(api, "/auth/login", method="POST",
+                        body={"email": email, "password": password}, expect=200)
+            assert d.get("access_token"), d
+            state["token"] = d["access_token"]
+
+        @check("грешна парола не пуска")
+        def _():
+            call(api, "/auth/login", method="POST",
+                 body={"email": email, "password": "грешна"}, expect=401)
+
+    if read_only:
+        print()
+        if FAILED:
+            print(f"\033[1;31m✗ {len(FAILED)} от {len(PASSED) + len(FAILED)} проверки се провалиха\033[0m")
+            for name, err in FAILED:
+                print(f"   · {name}: {err}")
+            return 1
+        print(f"\033[1;32m✓ всички {len(PASSED)} четящи проверки минаха "
+              f"(среда: {state.get('environment')})\033[0m")
+        return 0
 
     @check("създаване на дружество")
     def _():
@@ -199,7 +224,8 @@ def main(base: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("употреба: smoke.py <base-url>", file=sys.stderr)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if len(args) != 1:
+        print("употреба: smoke.py <base-url> [--read-only]", file=sys.stderr)
         raise SystemExit(2)
-    raise SystemExit(main(sys.argv[1]))
+    raise SystemExit(main(args[0], read_only="--read-only" in sys.argv))

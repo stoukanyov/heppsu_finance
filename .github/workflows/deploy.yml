@@ -122,4 +122,4 @@ jobs:
         run: |
           ssh heppsu-deploy 'mkdir -p /tmp/ci'
           scp infra/ci/smoke.py heppsu-deploy:/tmp/ci/smoke.py
-          ssh heppsu-deploy 'python3 /tmp/ci/smoke.py http://127.0.0.1:80'
+          ssh heppsu-deploy 'python3 /tmp/ci/smoke.py http://127.0.0.1:80 --read-only'
