@@ -627,6 +627,9 @@ const NAV = [
     ['income73','Справка чл.73','filePlus','vat.view'], ['reports','Отчети','chart','reports.view'],
     ['analytics','Анализи','brain','reports.view'],
   ]},
+  {sec:'ТРЗ', items:[
+    ['payroll','Заплати','users','payroll.view'],
+  ]},
   {sec:'Документи', items:[
     ['documents','Документи','doc','documents.view'],
   ]},
@@ -955,7 +958,7 @@ document.getElementById('company-select').onchange=async(e)=>{ companyId=e.targe
 let currentView='dashboard';
 const VIEWS={ dashboard:viewDashboard, accounting:viewAccounting, contacts:viewContacts, invoices:viewInvoices,
   purchases:viewPurchases, banking:viewBanking, payments:viewPayments, stores:viewStores, vat:viewVat, refunds:viewRefunds, income73:viewIncome73, reports:viewReports,
-  analytics:viewAnalytics, documents:viewDocuments, team:viewTeam, admin:viewAdmin, audit:viewAudit };
+  analytics:viewAnalytics, documents:viewDocuments, payroll:viewPayroll, team:viewTeam, admin:viewAdmin, audit:viewAudit };
 function navigate(view){
   currentView=view; location.hash=view;
   document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===view));
@@ -2063,6 +2066,336 @@ function showIntakeResult(res){
       toast(`Осчетоводено · операция №${r.entry.entry_number}`); box.innerHTML=''; loadDocs();
     }catch(e){ toast(e.message,true); b.disabled=false; b.textContent='Потвърди и осчетоводи'; } });
   box.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+/* ==================== ТРЗ И ЗАПЛАТИ ==================== */
+/* Всички ставки и прагове са параметри на потребителя — в кода няма нито един процент. */
+let prTab='runs';
+
+const PR_STAT={DRAFT:'s-gray',CALCULATED:'s-blue',APPROVED:'s-amber',POSTED:'s-green',CANCELLED:'s-gray'};
+const PR_STAT_BG={DRAFT:'Чернова',CALCULATED:'Изчислена',APPROVED:'Одобрена',POSTED:'Осчетоводена',CANCELLED:'Сторнирана'};
+const prPill=(s)=>`<span class="pill ${PR_STAT[s]||'s-gray'}">${esc(PR_STAT_BG[s]||s)}</span>`;
+const PR_ABSENCE={PAID_LEAVE:'Платен отпуск',UNPAID_LEAVE:'Неплатен отпуск',
+  SICK_EMPLOYER:'Болничен (работодател)',SICK_FUND:'Болничен (НОИ)'};
+const PR_CONTRACT={PERMANENT:'Безсрочен',FIXED_TERM:'Срочен',ADDITIONAL:'Допълнителен',MANAGEMENT:'Управление и контрол'};
+
+async function viewPayroll(main){
+  const tabs=[['runs','Ведомости'],['people','Служители'],['rates','Параметри']];
+  main.innerHTML=pageH('ТРЗ и заплати','Служители, договори, осигурителни параметри и месечни ведомости')+`
+    <div class="tabs" style="margin-bottom:16px;">${tabs.map(([k,l])=>
+      `<div class="tab ${prTab===k?'active':''}" data-tab="${k}">${esc(l)}</div>`).join('')}</div>
+    <div id="pr-body">${loading()}</div>`;
+  main.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{ prTab=b.dataset.tab; viewPayroll(main); });
+  const body=document.getElementById('pr-body');
+  try{
+    if(prTab==='runs') await prRuns(body);
+    else if(prTab==='people') await prPeople(body);
+    else await prRates(body);
+  }catch(e){ body.innerHTML=empty(e.message); }
+}
+
+/* ---------- ведомости ---------- */
+async function prRuns(box){
+  const runs=await api('/payroll/runs');
+  const now=new Date(); const y=now.getFullYear(), m=now.getMonth()+1;
+  const months=['януари','февруари','март','април','май','юни','юли','август','септември','октомври','ноември','декември'];
+  box.innerHTML=`
+    <div class="card" style="margin-bottom:16px;"><div class="row">
+      <div class="field" style="margin:0;min-width:120px;"><label>Година</label><input id="pr-y" type="number" value="${y}" min="2000" max="2100"></div>
+      <div class="field" style="margin:0;min-width:150px;"><label>Месец</label><select id="pr-m">${months.map((n,i)=>
+        `<option value="${i+1}" ${i+1===m?'selected':''}>${esc(n)}</option>`).join('')}</select></div>
+      ${can('payroll.calculate')?`<button id="pr-calc" class="primary">${ic('spark')}Изчисли ведомостта</button>`:''}
+      <div class="hint" style="align-self:center;">Системата изчислява и предлага — одобряването и осчетоводяването са отделни стъпки.</div>
+    </div></div>
+    <div class="card" style="margin-bottom:16px;"><div class="card-t"><h3>Ведомости</h3><span class="pill s-gray na">${runs.length}</span></div>
+      ${runs.length?`<table><thead><tr><th>Период</th><th class="num">Начислено</th><th class="num">За получаване</th><th>Статус</th><th class="num"></th></tr></thead><tbody>
+        ${runs.map(r=>`<tr><td class="strong">${esc(months[r.month-1])} ${r.year}</td>
+          <td class="num">${fmt(r.total_gross)}</td><td class="num strong">${fmt(r.total_net)}</td>
+          <td>${prPill(r.status)}</td>
+          <td class="num"><button class="sm pr-open" data-id="${r.id}">Отвори</button></td></tr>`).join('')}</tbody></table>`
+        :empty('Още няма изчислена ведомост.')}</div>
+    <div id="pr-detail"></div>`;
+  const calc=document.getElementById('pr-calc');
+  if(calc) calc.onclick=async()=>{
+    const year=Number(document.getElementById('pr-y').value), month=Number(document.getElementById('pr-m').value);
+    calc.disabled=true;
+    try{ const run=await api('/payroll/runs/calculate',{method:'POST',body:{year,month}});
+      toast('Ведомостта е изчислена'); await prRuns(box); prShowRun(run);
+    }catch(e){ toast(e.message,true); calc.disabled=false; } };
+  box.querySelectorAll('.pr-open').forEach(b=>b.onclick=async()=>{
+    try{ prShowRun(await api(`/payroll/runs/${b.dataset.id}`)); }catch(e){ toast(e.message,true); } });
+}
+
+function prShowRun(run){
+  const box=document.getElementById('pr-detail'); if(!box) return;
+  const months=['януари','февруари','март','април','май','юни','юли','август','септември','октомври','ноември','декември'];
+  const cost=Number(run.total_gross)+Number(run.total_employer_contributions);
+  const acts=[];
+  if(run.status==='CALCULATED'&&can('payroll.approve')) acts.push(`<button class="primary pr-act" data-act="approve" data-id="${run.id}">Одобри ведомостта</button>`);
+  if(run.status==='APPROVED'&&can('payroll.approve')){
+    acts.push(`<button class="primary pr-act" data-act="post" data-id="${run.id}">Осчетоводи</button>`);
+    acts.push(`<button class="pr-act" data-act="cancel" data-id="${run.id}">Върни за редакция</button>`);
+  }
+  box.innerHTML=`<div class="card" style="margin-top:16px;">
+    <div class="card-t"><h3>Ведомост · ${esc(months[run.month-1])} ${run.year}</h3>
+      <div class="flex">${prPill(run.status)}<span class="pill s-gray na">${run.working_days} работни дни</span></div></div>
+    <div class="kpis" style="margin-bottom:14px;">
+      <div class="card kpi"><div class="top"><div><div class="l">Начислено</div><div class="v">${fmt(run.total_gross)}</div></div><div class="chip c-blue">${ic('wallet')}</div></div></div>
+      <div class="card kpi"><div class="top"><div><div class="l">За получаване</div><div class="v">${fmt(run.total_net)}</div></div><div class="chip c-green">${ic('cash')}</div></div></div>
+      <div class="card kpi"><div class="top"><div><div class="l">Данък</div><div class="v">${fmt(run.total_income_tax)}</div></div><div class="chip c-amber">${ic('percent')}</div></div></div>
+      <div class="card kpi"><div class="top"><div><div class="l">Цена за работодателя</div><div class="v">${fmt(cost)}</div></div><div class="chip c-violet">${ic('trend')}</div></div></div>
+    </div>
+    ${run.lines.length?`<table><thead><tr><th>Служител</th><th>Длъжност</th><th class="num">Дни</th><th class="num">Начислено</th>
+      <th class="num">Осиг. доход</th><th class="num">Вноски (лице)</th><th class="num">Данък</th><th class="num">Нето</th></tr></thead><tbody>
+      ${run.lines.map(l=>`<tr><td class="strong">${esc(l.employee_name)}</td><td class="muted">${esc(l.position)}</td>
+        <td class="num">${l.worked_days}/${l.working_days}</td><td class="num">${fmt(l.gross_amount)}</td>
+        <td class="num">${fmt(l.insurance_income)}</td><td class="num">${fmt(l.employee_contributions)}</td>
+        <td class="num">${fmt(l.income_tax)}</td><td class="num strong">${fmt(l.net_amount)}</td></tr>`).join('')}
+      </tbody><tfoot><tr><td colspan="3" class="strong">Общо</td><td class="num strong">${fmt(run.total_gross)}</td><td class="num"></td>
+        <td class="num strong">${fmt(run.total_employee_contributions)}</td><td class="num strong">${fmt(run.total_income_tax)}</td>
+        <td class="num strong">${fmt(run.total_net)}</td></tr></tfoot></table>`:empty('Няма действащи договори за този месец.')}
+    ${acts.length?`<div class="flex" style="margin-top:14px;">${acts.join('')}</div>`:''}
+    ${run.journal_entry_id?`<div class="hint" style="margin-top:10px;">Осчетоводена със счетоводна операция.</div>`:''}
+  </div>
+  ${run.lines.length?`<div class="card" style="margin-top:16px;"><div class="card-t"><h3>Разбивка по фондове</h3></div>
+    <table><thead><tr><th>Служител</th><th>Фонд</th><th class="num">Основа</th><th class="num">За сметка на лицето</th><th class="num">За сметка на работодателя</th></tr></thead><tbody>
+    ${run.lines.flatMap(l=>l.contributions.map((c,i)=>`<tr><td class="${i?'muted-2':'strong'}">${i?'':esc(l.employee_name)}</td>
+      <td>${esc(c.name)}</td><td class="num">${fmt(c.base_amount)}</td><td class="num">${fmt(c.employee_amount)}</td>
+      <td class="num">${fmt(c.employer_amount)}</td></tr>`)).join('')}</tbody></table></div>`:''}`;
+  box.querySelectorAll('.pr-act').forEach(b=>b.onclick=async()=>{
+    b.disabled=true;
+    try{ const r=await api(`/payroll/runs/${b.dataset.id}/${b.dataset.act}`,{method:'POST'});
+      toast(b.dataset.act==='post'?'Ведомостта е осчетоводена':'Готово');
+      await prRuns(document.getElementById('pr-body')); prShowRun(r);
+    }catch(e){ toast(e.message,true); b.disabled=false; } });
+  box.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+/* ---------- служители и договори ---------- */
+async function prPeople(box){
+  const [employees,contracts]=await Promise.all([api('/payroll/employees'),api('/payroll/contracts')]);
+  const byEmp={}; contracts.forEach(c=>{ (byEmp[c.employee_id]=byEmp[c.employee_id]||[]).push(c); });
+  box.innerHTML=`
+    <div class="card" style="margin-bottom:16px;"><div class="card-t"><h3>Служители</h3>
+      <div class="flex"><span class="pill s-gray na">${employees.length}</span>
+      ${can('payroll.manage_employees')?`<button class="primary sm" id="pr-new-emp">${ic('userPlus')}Нов служител</button>`:''}</div></div>
+      ${employees.length?`<table><thead><tr><th>Име</th><th>ЕГН/ЛНЧ</th><th>Договори</th><th class="num">Заплата</th><th class="num"></th></tr></thead><tbody>
+        ${employees.map(e=>{ const cs=byEmp[e.id]||[]; const act=cs.find(c=>c.status==='ACTIVE');
+          return `<tr><td class="strong">${esc(e.full_name)}${e.is_active?'':' <span class="pill s-gray na">неактивен</span>'}</td>
+          <td class="muted">${esc(e.national_id)}</td>
+          <td>${cs.length?cs.map(c=>`<span class="pill ${c.status==='ACTIVE'?'s-green':'s-gray'} na">${esc(c.number)} · ${esc(c.position)}</span>`).join(' '):'<span class="muted-2">няма</span>'}</td>
+          <td class="num">${act?fmt(act.base_salary):'—'}</td>
+          <td class="num">${can('payroll.manage_employees')?`<button class="sm pr-new-contract" data-id="${e.id}" data-name="${esc(e.full_name)}">Нов договор</button>`:''}</td></tr>`;
+        }).join('')}</tbody></table>`:empty('Още няма въведени служители.')}</div>
+    <div class="card"><div class="card-t"><h3>Отсъствия</h3>
+      ${can('payroll.manage_employees')&&contracts.length?`<button class="sm" id="pr-new-abs">${ic('calendar')}Ново отсъствие</button>`:''}</div>
+      <div id="pr-abs">${loading()}</div></div>`;
+
+  const nb=document.getElementById('pr-new-emp');
+  if(nb) nb.onclick=()=>prEmployeeForm();
+  box.querySelectorAll('.pr-new-contract').forEach(b=>b.onclick=()=>prContractForm(b.dataset.id,b.dataset.name));
+  const ab=document.getElementById('pr-new-abs');
+  if(ab) ab.onclick=()=>prAbsenceForm(contracts,employees);
+
+  const absBox=document.getElementById('pr-abs');
+  const absences=await api('/payroll/absences');
+  const cName={}; contracts.forEach(c=>{ const e=employees.find(x=>x.id===c.employee_id);
+    cName[c.id]=`${e?e.full_name:'—'} · ${c.number}`; });
+  absBox.innerHTML=absences.length?`<table><thead><tr><th>Служител</th><th>Вид</th><th>От</th><th>До</th><th></th><th class="num"></th></tr></thead><tbody>
+    ${absences.map(a=>`<tr><td class="strong">${esc(cName[a.contract_id]||'—')}</td><td>${esc(PR_ABSENCE[a.absence_type]||a.absence_type)}</td>
+      <td>${esc(a.date_from)}</td><td>${esc(a.date_to)}</td><td class="muted-2">${esc(a.note||'')}</td>
+      <td class="num">${can('payroll.manage_employees')?`<button class="sm pr-del-abs" data-id="${a.id}">Изтрий</button>`:''}</td></tr>`).join('')}
+    </tbody></table>`:empty('Няма въведени отсъствия.');
+  absBox.querySelectorAll('.pr-del-abs').forEach(b=>b.onclick=async()=>{
+    try{ await api(`/payroll/absences/${b.dataset.id}`,{method:'DELETE'}); toast('Изтрито'); prPeople(box); }
+    catch(e){ toast(e.message,true); } });
+}
+
+function prEmployeeForm(){
+  openModal({title:'Нов служител', body:`
+    <div class="row"><div class="field"><label>Име</label><input id="e-fn"></div>
+      <div class="field"><label>Презиме</label><input id="e-mn"></div>
+      <div class="field"><label>Фамилия</label><input id="e-ln"></div></div>
+    <div class="row"><div class="field"><label>ЕГН / ЛНЧ</label><input id="e-nid"></div>
+      <div class="field"><label>IBAN</label><input id="e-iban" placeholder="BG.."></div></div>
+    <div class="row"><div class="field"><label>Имейл</label><input id="e-email"></div>
+      <div class="field"><label>Телефон</label><input id="e-phone"></div></div>
+    <div class="field"><label>Адрес</label><input id="e-addr"></div>`,
+    footer:`<button data-close-btn>Откажи</button><button class="primary" id="e-save">Запази</button>`,
+    onOpen:(bd)=>{
+      bd.querySelector('[data-close-btn]').onclick=closeModal;
+      bd.querySelector('#e-save').onclick=async()=>{
+        const v=id=>bd.querySelector('#'+id).value.trim();
+        try{ await api('/payroll/employees',{method:'POST',body:{
+            first_name:v('e-fn'), middle_name:v('e-mn')||null, last_name:v('e-ln'),
+            national_id:v('e-nid'), iban:v('e-iban')||null, email:v('e-email')||null,
+            phone:v('e-phone')||null, address:v('e-addr')||null }});
+          closeModal(); toast('Служителят е добавен'); navigate('payroll');
+        }catch(e){ toast(e.message,true); } };
+    }});
+}
+
+function prContractForm(employeeId, name){
+  const today=new Date().toISOString().slice(0,10);
+  openModal({title:'Нов трудов договор', subtitle:name, body:`
+    <div class="row"><div class="field"><label>Номер</label><input id="c-no"></div>
+      <div class="field"><label>Вид</label><select id="c-type">${Object.entries(PR_CONTRACT).map(([k,l])=>
+        `<option value="${k}">${esc(l)}</option>`).join('')}</select></div></div>
+    <div class="row"><div class="field"><label>Длъжност</label><input id="c-pos"></div>
+      <div class="field"><label>Код по НКПД</label><input id="c-nkpd" placeholder="напр. 25120001"></div></div>
+    <div class="row"><div class="field"><label>Начало</label><input id="c-from" type="date" value="${today}"></div>
+      <div class="field"><label>Край (за срочните)</label><input id="c-to" type="date"></div></div>
+    <div class="row"><div class="field"><label>Основно възнаграждение</label><input id="c-sal" type="number" step="0.01"></div>
+      <div class="field"><label>Признат стаж (години)</label><input id="c-sen" type="number" step="0.01" value="0"></div></div>
+    <div class="row"><div class="field"><label>Мин. осигурителен доход</label><input id="c-min" type="number" step="0.01" placeholder="по подразбиране от набора"></div>
+      <div class="field"><label>Платен отпуск (дни/год.)</label><input id="c-leave" type="number" value="20"></div></div>
+    <div class="hint">Празният минимален осигурителен доход означава „вземи стойността от набора параметри“.</div>`,
+    footer:`<button data-close-btn>Откажи</button><button class="primary" id="c-save">Запази</button>`,
+    onOpen:(bd)=>{
+      bd.querySelector('[data-close-btn]').onclick=closeModal;
+      bd.querySelector('#c-save').onclick=async()=>{
+        const v=id=>bd.querySelector('#'+id).value.trim();
+        try{ await api('/payroll/contracts',{method:'POST',body:{
+            employee_id:employeeId, number:v('c-no'), contract_type:v('c-type'), position:v('c-pos'),
+            nkpd_code:v('c-nkpd')||null, start_date:v('c-from'), end_date:v('c-to')||null,
+            base_salary:v('c-sal'), seniority_years_at_start:v('c-sen')||'0',
+            min_insurance_income:v('c-min')||null, paid_leave_days_per_year:Number(v('c-leave')||0) }});
+          closeModal(); toast('Договорът е създаден'); navigate('payroll');
+        }catch(e){ toast(e.message,true); } };
+    }});
+}
+
+function prAbsenceForm(contracts, employees){
+  const active=contracts.filter(c=>c.status==='ACTIVE');
+  const label=c=>{ const e=employees.find(x=>x.id===c.employee_id); return `${e?e.full_name:'—'} · ${c.number}`; };
+  const today=new Date().toISOString().slice(0,10);
+  openModal({title:'Ново отсъствие', body:`
+    <div class="field"><label>Договор</label><select id="a-c">${active.map(c=>
+      `<option value="${c.id}">${esc(label(c))}</option>`).join('')}</select></div>
+    <div class="field"><label>Вид</label><select id="a-t">${Object.entries(PR_ABSENCE).map(([k,l])=>
+      `<option value="${k}">${esc(l)}</option>`).join('')}</select></div>
+    <div class="row"><div class="field"><label>От</label><input id="a-from" type="date" value="${today}"></div>
+      <div class="field"><label>До</label><input id="a-to" type="date" value="${today}"></div></div>
+    <div class="field"><label>Бележка</label><input id="a-note"></div>
+    <div class="hint">Броят се само работните дни — уикендите и официалните празници отпадат автоматично.</div>`,
+    footer:`<button data-close-btn>Откажи</button><button class="primary" id="a-save">Запази</button>`,
+    onOpen:(bd)=>{
+      bd.querySelector('[data-close-btn]').onclick=closeModal;
+      bd.querySelector('#a-save').onclick=async()=>{
+        const v=id=>bd.querySelector('#'+id).value;
+        try{ await api('/payroll/absences',{method:'POST',body:{
+            contract_id:v('a-c'), absence_type:v('a-t'), date_from:v('a-from'),
+            date_to:v('a-to'), note:v('a-note')||null }});
+          closeModal(); toast('Отсъствието е записано'); navigate('payroll');
+        }catch(e){ toast(e.message,true); } };
+    }});
+}
+
+/* ---------- параметри (ставки и прагове) ---------- */
+async function prRates(box){
+  const sets=await api('/payroll/rate-sets');
+  box.innerHTML=`
+    <div class="card"><div class="card-t"><h3>Набори осигурителни параметри</h3>
+      <div class="flex"><span class="pill s-gray na">${sets.length}</span>
+      ${can('payroll.manage_rates')?`<button class="primary sm" id="pr-new-rs">${ic('plus')}Нов набор</button>`:''}</div></div>
+      <div class="hint" style="margin-bottom:12px;">Ставките и праговете се сменят всяка година — затова всеки набор
+        важи за период. Наборът, ползван от одобрена ведомост, се заключва: за нова година създай нов набор.</div>
+      ${sets.length?sets.map(s=>`<div class="card" style="margin-bottom:12px;">
+        <div class="card-t"><h3>${esc(s.name)}</h3><div class="flex">
+          <span class="pill s-blue na">${esc(s.valid_from)} → ${esc(s.valid_to||'безсрочно')}</span>
+          ${can('payroll.manage_rates')?`<button class="sm pr-edit-rs" data-id="${s.id}">Редактирай</button>`:''}</div></div>
+        <table><tbody>
+          <tr><td class="muted">Ставка на данъка върху доходите</td><td class="strong">${fmt(s.income_tax_percent)} %</td></tr>
+          <tr><td class="muted">Максимален осигурителен доход</td><td>${s.max_insurance_income?fmt(s.max_insurance_income):'<span class="muted-2">без таван</span>'}</td></tr>
+          <tr><td class="muted">Минимален осигурителен доход (по подразбиране)</td><td>${fmt(s.default_min_insurance_income)}</td></tr>
+          <tr><td class="muted">Клас прослужено време</td><td>${fmt(s.seniority_percent_per_year)} % на година стаж</td></tr>
+          <tr><td class="muted">Болничен за сметка на работодателя</td><td>${s.sick_employer_days} дни · ${fmt(s.sick_employer_percent)} %</td></tr>
+        </tbody></table>
+        ${s.contributions.length?`<table style="margin-top:10px;"><thead><tr><th>Фонд</th><th class="num">Лице</th><th class="num">Работодател</th>
+          <th>Основа</th><th>Намалява облагаемото</th></tr></thead><tbody>
+          ${s.contributions.map(c=>`<tr><td class="strong">${esc(c.name)} <span class="muted-2">${esc(c.code)}</span></td>
+            <td class="num">${fmt(c.employee_percent)} %</td><td class="num">${fmt(c.employer_percent)} %</td>
+            <td>${c.base==='INSURANCE_INCOME'?'осигурителен доход':'брутно'}</td>
+            <td>${c.reduces_taxable_income?ic('check'):'<span class="muted-2">не</span>'}</td></tr>`).join('')}
+          </tbody></table>`:`<div class="hint" style="margin-top:8px;">Няма зададени фондове — ведомостта ще удържи само данък.</div>`}
+      </div>`).join(''):empty('Още няма набор параметри. Създай го, за да може да се изчислява ведомост.')}
+    </div>`;
+  const nb=document.getElementById('pr-new-rs');
+  if(nb) nb.onclick=()=>prRateSetForm(null);
+  box.querySelectorAll('.pr-edit-rs').forEach(b=>b.onclick=async()=>{
+    try{ prRateSetForm(await api(`/payroll/rate-sets/${b.dataset.id}`)); }catch(e){ toast(e.message,true); } });
+}
+
+async function prRateSetForm(existing){
+  const accounts=(await getAccounts()).filter(a=>!a.is_group);
+  const opts=(sel)=>accounts.map(a=>`<option value="${a.id}" ${sel===a.id?'selected':''}>${esc(a.code)} — ${esc(a.name)}</option>`).join('');
+  const s=existing||{};
+  const rows=(s.contributions||[]).length?s.contributions:[];
+  const rowHtml=(c={})=>`<tr class="rs-row">
+    <td><input class="rs-code" value="${esc(c.code||'')}" placeholder="ДОО"></td>
+    <td><input class="rs-name" value="${esc(c.name||'')}" placeholder="Държавно обществено осигуряване"></td>
+    <td><input class="rs-emp" type="number" step="0.0001" value="${c.employee_percent??''}" placeholder="0"></td>
+    <td><input class="rs-empr" type="number" step="0.0001" value="${c.employer_percent??''}" placeholder="0"></td>
+    <td><select class="rs-base"><option value="INSURANCE_INCOME" ${c.base!=='GROSS'?'selected':''}>осиг. доход</option>
+      <option value="GROSS" ${c.base==='GROSS'?'selected':''}>брутно</option></select></td>
+    <td style="text-align:center;"><input class="rs-red" type="checkbox" ${c.reduces_taxable_income!==false?'checked':''}></td>
+    <td><select class="rs-exp"><option value="">— разход —</option>${opts(c.gl_expense_account_id)}</select></td>
+    <td><select class="rs-liab"><option value="">— разчет —</option>${opts(c.gl_liability_account_id)}</select></td>
+    <td class="num"><button class="sm rs-del">×</button></td></tr>`;
+
+  openModal({title:existing?'Редакция на параметрите':'Нов набор параметри', size:'lg',
+    subtitle:'Всички стойности са твои — системата не носи предположения за ставки.',
+    body:`
+    <div class="row"><div class="field"><label>Име</label><input id="rs-name" value="${esc(s.name||'')}" placeholder="напр. 2026"></div>
+      <div class="field"><label>Валиден от</label><input id="rs-from" type="date" value="${esc(s.valid_from||'')}"></div>
+      <div class="field"><label>Валиден до</label><input id="rs-to" type="date" value="${esc(s.valid_to||'')}"></div></div>
+    <div class="row"><div class="field"><label>Данък върху доходите (%)</label><input id="rs-tax" type="number" step="0.0001" value="${s.income_tax_percent??''}"></div>
+      <div class="field"><label>Макс. осигурителен доход</label><input id="rs-max" type="number" step="0.01" value="${s.max_insurance_income??''}" placeholder="празно = без таван"></div>
+      <div class="field"><label>Мин. осигурителен доход</label><input id="rs-min" type="number" step="0.01" value="${s.default_min_insurance_income??''}"></div></div>
+    <div class="row"><div class="field"><label>Клас стаж (% на година)</label><input id="rs-sen" type="number" step="0.0001" value="${s.seniority_percent_per_year??''}"></div>
+      <div class="field"><label>Болничен — дни за работодателя</label><input id="rs-sd" type="number" value="${s.sick_employer_days??0}"></div>
+      <div class="field"><label>Болничен — процент</label><input id="rs-sp" type="number" step="0.0001" value="${s.sick_employer_percent??''}"></div></div>
+    <div class="card-t" style="margin-top:8px;"><h3>Осигурителни фондове</h3><button class="sm" id="rs-add">${ic('plus')}Добави фонд</button></div>
+    <div style="overflow-x:auto;"><table><thead><tr><th>Код</th><th>Наименование</th><th>Лице %</th><th>Работодател %</th>
+      <th>Основа</th><th>Намалява данъчната основа</th><th>Сметка разход</th><th>Сметка разчет</th><th></th></tr></thead>
+      <tbody id="rs-rows">${rows.map(rowHtml).join('')}</tbody></table></div>
+    <div class="card-t" style="margin-top:14px;"><h3>Сметки за осчетоводяване</h3></div>
+    <div class="row"><div class="field"><label>Разход за заплати</label><select id="rs-acc-exp"><option value="">—</option>${opts(s.gl_salary_expense_account_id)}</select></div>
+      <div class="field"><label>Разчети с персонала</label><select id="rs-acc-pay"><option value="">—</option>${opts(s.gl_salary_payable_account_id)}</select></div>
+      <div class="field"><label>Данък върху доходите</label><select id="rs-acc-tax"><option value="">—</option>${opts(s.gl_income_tax_account_id)}</select></div></div>`,
+    footer:`<button data-close-btn>Откажи</button><button class="primary" id="rs-save">Запази</button>`,
+    onOpen:(bd)=>{
+      const tbody=bd.querySelector('#rs-rows');
+      const bindDel=()=>tbody.querySelectorAll('.rs-del').forEach(b=>b.onclick=()=>{ b.closest('tr').remove(); });
+      bindDel();
+      bd.querySelector('#rs-add').onclick=()=>{ tbody.appendChild(el(rowHtml())); bindDel(); };
+      bd.querySelector('[data-close-btn]').onclick=closeModal;
+      bd.querySelector('#rs-save').onclick=async()=>{
+        const v=id=>bd.querySelector('#'+id).value.trim();
+        const contributions=[...tbody.querySelectorAll('.rs-row')].map((tr,i)=>({
+          code:tr.querySelector('.rs-code').value.trim(),
+          name:tr.querySelector('.rs-name').value.trim(),
+          employee_percent:tr.querySelector('.rs-emp').value||'0',
+          employer_percent:tr.querySelector('.rs-empr').value||'0',
+          base:tr.querySelector('.rs-base').value,
+          reduces_taxable_income:tr.querySelector('.rs-red').checked,
+          sort_order:i+1,
+          gl_expense_account_id:tr.querySelector('.rs-exp').value||null,
+          gl_liability_account_id:tr.querySelector('.rs-liab').value||null,
+        })).filter(c=>c.code&&c.name);
+        const body={ name:v('rs-name'), valid_from:v('rs-from'), valid_to:v('rs-to')||null,
+          income_tax_percent:v('rs-tax')||'0', max_insurance_income:v('rs-max')||null,
+          default_min_insurance_income:v('rs-min')||'0', seniority_percent_per_year:v('rs-sen')||'0',
+          sick_employer_days:Number(v('rs-sd')||0), sick_employer_percent:v('rs-sp')||'0',
+          gl_salary_expense_account_id:v('rs-acc-exp')||null,
+          gl_salary_payable_account_id:v('rs-acc-pay')||null,
+          gl_income_tax_account_id:v('rs-acc-tax')||null, contributions };
+        try{
+          if(existing) await api(`/payroll/rate-sets/${existing.id}`,{method:'PATCH',body});
+          else await api('/payroll/rate-sets',{method:'POST',body});
+          closeModal(); toast('Параметрите са запазени'); navigate('payroll');
+        }catch(e){ toast(e.message,true); } };
+    }});
 }
 
 /* ==================== ЕКИП ==================== */

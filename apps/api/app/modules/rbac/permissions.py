@@ -47,6 +47,13 @@ PERMISSIONS: dict[str, list[tuple[str, str]]] = {
         ("submissions.prepare", "Подготвяне на пакети за НАП"),
         ("submissions.record", "Отбелязване на подаване и импорт на разписки"),
     ],
+    "ТРЗ и заплати": [
+        ("payroll.view", "Преглед на служители, договори и ведомости"),
+        ("payroll.manage_employees", "Управление на служители, договори и отсъствия"),
+        ("payroll.manage_rates", "Управление на осигурителните параметри и ставки"),
+        ("payroll.calculate", "Изчисляване на ведомост"),
+        ("payroll.approve", "Одобряване и осчетоводяване на ведомост"),
+    ],
     "Документи": [
         ("documents.view", "Преглед на документи"),
         ("documents.upload", "Качване и сканиране на документи"),
@@ -124,7 +131,7 @@ ROLE_TEMPLATES: list[RoleTemplate] = [
         ),
         permissions=[
             *_only("accounting.", "vat.", "invoices.", "purchases.", "counterparties.",
-                   "banking.", "documents.", "reports.", "assets.", "submissions."),
+                   "banking.", "documents.", "reports.", "assets.", "submissions.", "payroll."),
             "payments.view", "payments.approve", "ai.use", "company.view", "team.view", "audit.view",
         ],
         can_use_mobile=True,
@@ -145,6 +152,7 @@ ROLE_TEMPLATES: list[RoleTemplate] = [
             "vat.view", "vat.manage",
             "documents.view", "documents.upload", "documents.approve",
             "reports.view", "reports.export", "assets.view", "ai.use", "company.view",
+            "payroll.view", "payroll.manage_employees", "payroll.calculate",
         ],
         can_use_mobile=True,
     ),
@@ -159,6 +167,7 @@ ROLE_TEMPLATES: list[RoleTemplate] = [
             "vat.view", "vat.refund_manage", "documents.view", "documents.approve",
             "reports.view", "reports.export", "ai.use", "stores.view", "stores.sync",
             "company.view", "team.view", "audit.view", "assets.view",
+            "payroll.view", "payroll.approve",
         ],
         can_use_mobile=True,
     ),
@@ -170,7 +179,7 @@ ROLE_TEMPLATES: list[RoleTemplate] = [
             "плащания и без управление на екипа."
         ),
         permissions=[
-            *_only("accounting.", "vat.", "purchases.", "documents.", "submissions."),
+            *_only("accounting.", "vat.", "purchases.", "documents.", "submissions.", "payroll."),
             "invoices.view", "counterparties.view", "counterparties.manage",
             "banking.view", "banking.import", "banking.reconcile",
             "reports.view", "reports.export", "assets.view", "assets.manage", "company.view",
@@ -205,6 +214,7 @@ ROLE_TEMPLATES: list[RoleTemplate] = [
             "accounting.view", "invoices.view", "purchases.view", "counterparties.view",
             "banking.view", "payments.view", "vat.view", "documents.view",
             "reports.view", "reports.export", "audit.view", "assets.view", "company.view",
+            "payroll.view",
         ],
         can_use_mobile=False,
     ),
