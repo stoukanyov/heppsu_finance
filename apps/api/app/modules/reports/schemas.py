@@ -140,3 +140,20 @@ class KpiSummaryOut(BaseModel):
     cash: Decimal          # налични парични средства към date_to (салдо)
     receivables: Decimal   # вземания от клиенти към date_to
     payables: Decimal      # задължения към доставчици към date_to
+
+
+# ---------- Времеви ряд по месеци (за графиките на таблото) ----------
+class KpiPoint(BaseModel):
+    period: str            # „2026-07"
+    label: str             # „юли"
+    date_from: dt.date
+    date_to: dt.date
+    revenue: Decimal
+    expenses: Decimal
+    profit: Decimal
+    cash: Decimal          # салдо в края на месеца
+
+
+class KpiSeriesOut(BaseModel):
+    points: list[KpiPoint]
+    currency: str

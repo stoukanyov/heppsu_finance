@@ -10,6 +10,7 @@ from app.modules.reports.schemas import (
     BalanceSheetOut,
     CashFlowOut,
     GeneralLedgerOut,
+    KpiSeriesOut,
     KpiSummaryOut,
     ProfitAndLossOut,
     TrialBalanceOut,
@@ -49,6 +50,17 @@ def kpis(
 ) -> KpiSummaryOut:
     """KPI обобщение за период (за дашборд и сравнение с предходен период)."""
     return service.kpi_summary(db, ctx.company.id, date_from, date_to)
+
+
+@router.get("/kpi-series", response_model=KpiSeriesOut, dependencies=[require("reports.view")])
+def kpi_series(
+    ctx: CurrentCompany,
+    db: DbSession,
+    months: int = 6,
+    end: dt.date | None = None,
+) -> KpiSeriesOut:
+    """Приходи/разходи/печалба по месеци и салдо на парите — за графиките на таблото."""
+    return service.kpi_series(db, ctx.company.id, months, end)
 
 
 @router.get("/balance-sheet", response_model=BalanceSheetOut, dependencies=[require("reports.view")])

@@ -25,6 +25,7 @@ from app.modules.accounting.models import (
     JournalEntry,
     JournalLine,
 )
+from app.modules.companies.models import Company
 from app.modules.reports.schemas import (
     BalanceLine,
     BalanceSection,
@@ -32,6 +33,8 @@ from app.modules.reports.schemas import (
     CashFlowOut,
     CashFlowSection,
     GeneralLedgerOut,
+    KpiPoint,
+    KpiSeriesOut,
     KpiSummaryOut,
     LedgerLine,
     PnlGroup,
@@ -346,6 +349,97 @@ def kpi_summary(
         cash=cash,
         receivables=receivables,
         payables=payables,
+    )
+
+
+_MONTHS_BG = (
+    "януари", "февруари", "март", "април", "май", "юни",
+    "юли", "август", "септември", "октомври", "ноември", "декември",
+)
+
+
+def _month_bounds(year: int, month: int) -> tuple[dt.date, dt.date]:
+    first = dt.date(year, month, 1)
+    last = dt.date(year + (month == 12), (month % 12) + 1, 1) - dt.timedelta(days=1)
+    return first, last
+
+
+def kpi_series(
+    db: Session,
+    company_id: uuid.UUID,
+    months: int = 6,
+    end: dt.date | None = None,
+) -> KpiSeriesOut:
+    """Приходи/разходи/печалба по месеци + салдо на парите в края на всеки месец.
+
+    Прави ЕДИН обход над осчетоводените редове (за разлика от N заявки към
+    `kpi_summary`), защото се ползва при всяко зареждане на таблото.
+    """
+    months = max(1, min(months, 36))
+    end = end or dt.date.today()
+    accounts = {
+        a.id: a for a in db.scalars(select(Account).where(Account.company_id == company_id))
+    }
+
+    # Хронологичен списък от (година, месец) за прозореца, най-старият първи.
+    window: list[tuple[int, int]] = []
+    y, m = end.year, end.month
+    for _ in range(months):
+        window.append((y, m))
+        y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+    window.reverse()
+    index = {ym: i for i, ym in enumerate(window)}
+    start_of_window = _month_bounds(*window[0])[0]
+    end_of_window = _month_bounds(*window[-1])[1]
+
+    revenue = [ZERO] * months
+    expenses = [ZERO] * months
+    # Парите са САЛДО: движенията преди прозореца дават началното салдо, след което
+    # всеки месец натрупва върху предходния.
+    cash_delta = [ZERO] * months
+    cash_opening = ZERO
+
+    for line, entry in _posted_lines(db, company_id):
+        acc = accounts.get(line.account_id)
+        if acc is None:
+            continue
+        pdate = entry.document_date
+        if pdate > end_of_window:
+            continue
+        if _is_cash_code(acc.code):
+            delta = line.debit_base - line.credit_base
+            if pdate < start_of_window:
+                cash_opening += delta
+            else:
+                cash_delta[index[(pdate.year, pdate.month)]] += delta
+        if pdate < start_of_window:
+            continue
+        i = index[(pdate.year, pdate.month)]
+        if acc.type == AccountType.REVENUE:
+            revenue[i] += line.credit_base - line.debit_base
+        elif acc.type == AccountType.EXPENSE:
+            expenses[i] += line.debit_base - line.credit_base
+
+    company = db.get(Company, company_id)
+    points: list[KpiPoint] = []
+    running = cash_opening
+    for i, (yy, mm) in enumerate(window):
+        running += cash_delta[i]
+        first, last = _month_bounds(yy, mm)
+        points.append(
+            KpiPoint(
+                period=f"{yy}-{mm:02d}",
+                label=_MONTHS_BG[mm - 1],
+                date_from=first,
+                date_to=last,
+                revenue=revenue[i],
+                expenses=expenses[i],
+                profit=revenue[i] - expenses[i],
+                cash=running,
+            )
+        )
+    return KpiSeriesOut(
+        points=points, currency=(company.base_currency if company else "EUR")
     )
 
 
