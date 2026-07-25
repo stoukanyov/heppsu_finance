@@ -1,0 +1,42 @@
+# Локален / първоначален production стек: PostgreSQL + API.
+# Стартиране:  docker compose up --build
+# API:         http://localhost:8000/docs
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aifos
+      POSTGRES_PASSWORD: aifos
+      POSTGRES_DB: aifos
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aifos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./apps/api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://aifos:aifos@db:5432/aifos
+      # Prod: схемата се управлява с Alembic (не с авто-създаване).
+      AUTO_CREATE_TABLES: "false"
+      SECRET_KEY: "CHANGE-ME-IN-PRODUCTION"
+      ENVIRONMENT: production
+      # AI: подай реалния ключ през средата, за да активираш Claude.
+      # ANTHROPIC_API_KEY: "sk-ant-..."
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

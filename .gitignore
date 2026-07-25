@@ -1,0 +1,29 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local databases / env
+*.db
+*.sqlite3
+.env
+.env.local
+
+# Uploaded document storage (local dev)
+storage/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Node (web app, later)
+node_modules/
+dist/
+
+# Claude Code local settings
+.claude/

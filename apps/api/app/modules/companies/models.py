@@ -1,0 +1,71 @@
+"""Tenant & Company Management — компании и членство на потребители с роли (RBAC)."""
+from __future__ import annotations
+
+import enum
+import uuid
+from typing import TYPE_CHECKING
+
+from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, String, UniqueConstraint, Uuid
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from app.modules.identity.models import User
+
+
+class CompanyRole(str, enum.Enum):
+    """Роли в контекста на конкретна компания (по master prompt, раздел 4)."""
+
+    OWNER = "OWNER"                        # Собственик
+    MANAGER = "MANAGER"                    # Управител
+    CFO = "CFO"                            # Финансов директор
+    CHIEF_ACCOUNTANT = "CHIEF_ACCOUNTANT"  # Главен счетоводител
+    ACCOUNTANT = "ACCOUNTANT"              # Оперативен счетоводител
+    EXTERNAL_ACCOUNTANT = "EXTERNAL_ACCOUNTANT"  # Външна счетоводна къща
+    AUDITOR = "AUDITOR"                    # Одитор (read-only + traceability)
+    TAX_CONSULTANT = "TAX_CONSULTANT"      # Данъчен консултант
+    EMPLOYEE_SUBMITTER = "EMPLOYEE_SUBMITTER"  # Служител, подаващ разход
+    EMPLOYEE_APPROVER = "EMPLOYEE_APPROVER"    # Служител, одобряващ разход
+    SYS_ADMIN = "SYS_ADMIN"                # Системен администратор
+    SECURITY_ADMIN = "SECURITY_ADMIN"      # Security администратор
+    READ_ONLY = "READ_ONLY"                # Read-only потребител
+
+
+class Company(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "companies"
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    eik: Mapped[str | None] = mapped_column(String(20), index=True, nullable=True)          # ЕИК
+    vat_number: Mapped[str | None] = mapped_column(String(20), index=True, nullable=True)   # ДДС номер
+    country: Mapped[str] = mapped_column(String(2), default="BG", nullable=False)           # ISO-3166 alpha-2
+    base_currency: Mapped[str] = mapped_column(String(3), default="EUR", nullable=False)    # ISO-4217
+    is_vat_registered: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    memberships: Mapped[list["Membership"]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<Company {self.name}>"
+
+
+class Membership(UUIDMixin, TimestampMixin, Base):
+    """Връзка потребител ↔ компания с роля. Носител на tenant достъпа."""
+
+    __tablename__ = "memberships"
+    __table_args__ = (UniqueConstraint("user_id", "company_id", name="uq_membership_user_company"),)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("companies.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    role: Mapped[CompanyRole] = mapped_column(
+        SAEnum(CompanyRole, native_enum=False, length=32), nullable=False
+    )
+
+    user: Mapped["User"] = relationship(back_populates="memberships")
+    company: Mapped["Company"] = relationship(back_populates="memberships")

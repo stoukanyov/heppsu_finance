@@ -1,0 +1,913 @@
+<!doctype html>
+<html lang="bg">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Finance OS</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #111827; --ink-2:#1f2430; --muted: #6b7280; --muted-2:#9ca3af;
+    --line: #edeef1; --line-2:#e5e7eb;
+    --accent: #5b52e6; --accent-2:#6d64f2; --accent-soft: #eef0fe; --accent-ink:#4b43d6;
+    --good: #16a34a; --good-soft:#e7f6ec; --bad: #dc2626; --bad-soft:#fdecec; --warn: #d97706; --warn-soft:#fdf3e6;
+    --info:#2563eb; --info-soft:#e8f0fe;
+    --radius: 14px; --radius-sm:10px;
+    --shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.05);
+    --shadow-sm: 0 1px 2px rgba(16,24,40,.06);
+  }
+  * { box-sizing: border-box; }
+  html,body { height:100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 14px; line-height: 1.5; -webkit-font-smoothing:antialiased; }
+  a { color: var(--accent); text-decoration: none; }
+  h1,h2,h3,h4 { margin: 0; font-weight: 650; letter-spacing:-.01em; }
+  h2 { font-size: 20px; } h3 { font-size: 15px; } h4{font-size:13px;}
+  svg { display:block; }
+
+  button { font: inherit; cursor: pointer; border: 1px solid var(--line-2); background: #fff;
+    padding: 9px 14px; border-radius: var(--radius-sm); color: var(--ink-2); transition: .12s; font-weight:500;
+    display:inline-flex; align-items:center; gap:7px; white-space:nowrap; }
+  button:hover { border-color: #d3d6db; background: #fafbfc; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow:0 1px 2px rgba(91,82,230,.3); }
+  button.primary:hover { background: var(--accent-ink); border-color:var(--accent-ink); }
+  button.ghost { border-color: transparent; background: transparent; color:var(--muted); padding:8px; }
+  button.ghost:hover { background:#f0f1f4; color:var(--ink); }
+  button.sm { padding:6px 10px; font-size:12.5px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .icon-btn { width:38px; height:38px; padding:0; justify-content:center; border-radius:10px; border-color:transparent; background:transparent; color:var(--muted); }
+  .icon-btn:hover { background:#f0f1f4; color:var(--ink); }
+
+  input, select, textarea { font: inherit; padding: 9px 11px; border: 1px solid var(--line-2);
+    border-radius: var(--radius-sm); background: #fff; color: var(--ink); width: 100%; transition:.12s; }
+  input:focus, select:focus, textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 0 0 5px; font-weight:500; }
+  .field { margin-bottom: 12px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow-sm); padding: 20px; }
+  .card-t { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+  .muted { color: var(--muted); } .muted-2{color:var(--muted-2);}
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--line); }
+  thead th { font-size: 11.5px; color: var(--muted-2); font-weight: 600; text-transform:uppercase; letter-spacing:.03em;
+    border-bottom:1px solid var(--line-2); }
+  tbody tr:last-child td { border-bottom:none; }
+  tbody tr:hover { background:#fafbfc; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.strong { font-weight:600; color:var(--ink); }
+
+  .pill { display: inline-flex; align-items:center; gap:5px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight:600; background:#f1f2f5; color:#4b5563; }
+  .pill::before{ content:""; width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.8;}
+  .pill.na::before{display:none;}
+  .s-green{ background:var(--good-soft); color:#15803d;} .s-red{background:var(--bad-soft);color:#b91c1c;}
+  .s-amber{background:var(--warn-soft);color:#b45309;} .s-violet{background:var(--accent-soft);color:var(--accent-ink);}
+  .s-blue{background:var(--info-soft);color:#1d4ed8;} .s-gray{background:#f1f2f5;color:#4b5563;}
+
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items:center; margin-bottom: 18px; }
+  .grow{flex:1;} .spacer{flex:1;}
+  .stack > * + * { margin-top: 16px; }
+  .flex { display: flex; gap: 10px; align-items: center; }
+  .spread { justify-content: space-between; }
+  .grid { display:grid; gap:16px; }
+  .badge-ok { color: var(--good); font-weight:600; } .badge-bad { color: var(--bad); font-weight:600; }
+  .hint{ font-size:12px; color:var(--muted-2); }
+
+  /* Auth */
+  #auth { min-height: 100vh; display: grid; place-items: center; padding: 20px;
+    background: radial-gradient(1200px 500px at 50% -10%, #eef0fe, transparent), var(--bg); }
+  #auth .card { width: 380px; box-shadow:var(--shadow); }
+  .brand { font-weight: 750; letter-spacing: -.03em; display:flex; align-items:center; gap:9px; }
+  .brand .logo{ width:30px;height:30px;border-radius:9px; background:linear-gradient(135deg,var(--accent),#8b7bf5);
+    display:grid;place-items:center;color:#fff;font-weight:800;font-size:16px; box-shadow:0 2px 8px rgba(91,82,230,.35);}
+
+  /* Shell */
+  #shell { display: none; grid-template-columns: 244px 1fr; min-height: 100vh; }
+  aside { background: #fff; border-right:1px solid var(--line); padding: 16px 14px; display:flex; flex-direction:column;
+    position:sticky; top:0; height:100vh; overflow-y:auto; }
+  aside .brand { font-size:16px; padding:6px 8px 18px; color:var(--ink); }
+  .nav-sec{ font-size:10.5px; font-weight:700; color:var(--muted-2); letter-spacing:.08em; text-transform:uppercase; padding:14px 12px 6px; }
+  nav a { display: flex; align-items:center; gap:11px; padding: 9px 12px; border-radius: 10px; color: var(--ink-2);
+    margin-bottom: 1px; font-weight:500; font-size:13.5px; }
+  nav a svg{ width:18px;height:18px; color:var(--muted); flex:none; }
+  nav a:hover { background:#f5f6f8; }
+  nav a.active { background: var(--accent-soft); color: var(--accent-ink); font-weight:600; }
+  nav a.active svg{ color:var(--accent); }
+  .side-foot{ margin-top:auto; padding-top:14px; border-top:1px solid var(--line); }
+  .userchip{ display:flex; align-items:center; gap:10px; padding:8px; border-radius:10px; }
+  .avatar{ width:34px;height:34px;border-radius:9px; background:linear-gradient(135deg,#5b52e6,#8b7bf5); color:#fff;
+    display:grid;place-items:center;font-weight:700;font-size:14px; flex:none;}
+  .avatar.sm{width:30px;height:30px;font-size:12px;border-radius:8px;}
+
+  header.topbar { display: flex; justify-content: space-between; align-items: center; gap:16px;
+    padding: 12px 28px; border-bottom: 1px solid var(--line); background: #fff; position:sticky; top:0; z-index:20; }
+  .search{ position:relative; flex:1; max-width:420px; }
+  .search svg{ position:absolute; left:12px; top:50%; transform:translateY(-50%); width:17px;height:17px; color:var(--muted-2); }
+  .search input{ padding-left:36px; background:#f5f6f8; border-color:transparent; }
+  .search input:focus{ background:#fff; }
+  .topbar-r{ display:flex; align-items:center; gap:6px; }
+  .company-sel{ display:flex; align-items:center; gap:8px; padding:6px 10px 6px 8px; border:1px solid var(--line-2); border-radius:10px; }
+  .company-sel select{ border:none; padding:2px 4px; width:auto; font-weight:600; background:transparent; }
+  .company-sel select:focus{box-shadow:none;}
+
+  main { padding: 26px 28px; max-width: 1240px; }
+  .page-h{ display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:22px; flex-wrap:wrap;}
+  .page-h .sub{ color:var(--muted); font-size:13.5px; margin-top:3px; }
+
+  /* KPI */
+  .kpis{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:16px; }
+  .kpi{ padding:18px; }
+  .kpi .top{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+  .kpi .chip{ width:40px;height:40px;border-radius:11px; display:grid;place-items:center; }
+  .kpi .chip svg{width:20px;height:20px;}
+  .kpi .l{ font-size:13px; color:var(--muted); font-weight:500; }
+  .kpi .v{ font-size:25px; font-weight:700; letter-spacing:-.02em; margin-top:2px; }
+  .delta{ font-size:12px; font-weight:600; display:inline-flex; align-items:center; gap:3px; padding:3px 7px; border-radius:7px; }
+  .delta.up{ color:var(--good); background:var(--good-soft);} .delta.down{ color:var(--bad); background:var(--bad-soft);}
+  .c-violet{background:var(--accent-soft);color:var(--accent);} .c-green{background:var(--good-soft);color:var(--good);}
+  .c-red{background:var(--bad-soft);color:var(--bad);} .c-blue{background:var(--info-soft);color:var(--info);}
+  .c-amber{background:var(--warn-soft);color:var(--warn);} .c-teal{background:#e6f6f4;color:#0d9488;}
+
+  .cols{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .cols-3{ display:grid; grid-template-columns:2fr 1fr; gap:16px; }
+  @media(max-width:900px){ .cols,.cols-3{grid-template-columns:1fr;} #shell{grid-template-columns:1fr;} aside{display:none;} }
+
+  .legend{ display:flex; flex-direction:column; gap:9px; }
+  .legend .li{ display:flex; align-items:center; justify-content:space-between; font-size:13px; }
+  .legend .dot{ width:9px;height:9px;border-radius:3px; display:inline-block; margin-right:8px; }
+  .bar-row{ margin-bottom:12px; } .bar-row:last-child{margin-bottom:0;}
+  .bar-row .lab{ display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px; }
+  .bar{ height:9px; border-radius:6px; background:#eef0f3; overflow:hidden; }
+  .bar > span{ display:block; height:100%; border-radius:6px; }
+
+  .check li{ list-style:none; padding:7px 0; display:flex; gap:9px; align-items:flex-start; border-bottom:1px solid var(--line); }
+  .check{ padding:0; margin:0; } .check li:last-child{border-bottom:none;}
+  .check svg{ width:17px;height:17px; color:var(--good); flex:none; margin-top:1px; }
+
+  .steps{ display:flex; align-items:center; gap:6px; margin-bottom:20px; flex-wrap:wrap; }
+  .step{ display:flex; align-items:center; gap:8px; padding:7px 13px; border-radius:999px; background:#f2f3f6; color:var(--muted); font-size:12.5px; font-weight:600; }
+  .step .n{ width:20px;height:20px;border-radius:50%; background:#dfe1e7; color:#fff; display:grid;place-items:center; font-size:11px; }
+  .step.active{ background:var(--accent-soft); color:var(--accent-ink);} .step.active .n{ background:var(--accent);}
+  .step.done{ background:var(--good-soft); color:#15803d;} .step.done .n{ background:var(--good);}
+  .step-sep{ width:16px;height:2px;background:#e3e5ea;border-radius:2px;}
+
+  .tabs{ display:flex; gap:4px; border-bottom:1px solid var(--line-2); margin-bottom:16px; flex-wrap:wrap; }
+  .tab{ padding:9px 14px; font-size:13.5px; font-weight:600; color:var(--muted); border-bottom:2px solid transparent; cursor:pointer; margin-bottom:-1px; }
+  .tab:hover{ color:var(--ink); } .tab.active{ color:var(--accent-ink); border-bottom-color:var(--accent); }
+
+  .empty{ text-align:center; color:var(--muted-2); padding:34px 10px; }
+  .empty svg{ width:34px;height:34px; margin-bottom:8px; opacity:.5; }
+  .drop{ border:1.5px dashed var(--line-2); border-radius:var(--radius); padding:22px; text-align:center; color:var(--muted); background:#fafbfc; }
+
+  #toast { position: fixed; bottom: 22px; right: 22px; max-width: 380px; z-index: 90; }
+  .toast { background: #111827; color: #fff; padding: 12px 16px; border-radius: 11px; box-shadow: 0 8px 30px rgba(0,0,0,.2); margin-top: 10px; display:flex; gap:9px; align-items:center; font-weight:500; }
+  .toast svg{width:18px;height:18px;flex:none;}
+  .toast.err { background: #b91c1c; }
+  .spin{ animation:sp 1s linear infinite; } @keyframes sp{to{transform:rotate(360deg);}}
+  .skel{ background:linear-gradient(90deg,#eef0f3 25%,#f6f7f9 50%,#eef0f3 75%); background-size:200% 100%; animation:sh 1.3s infinite; border-radius:8px; height:14px; }
+  @keyframes sh{to{background-position:-200% 0;}}
+</style>
+</head>
+<body>
+
+<!-- ==================== AUTH ==================== -->
+<div id="auth" style="display:none;">
+  <div class="card">
+    <div class="brand" style="font-size:19px;margin-bottom:6px;"><span class="logo">A</span>AI Finance OS</div>
+    <div class="muted" style="margin-bottom:20px;">Финансовата операционна система за вашия бизнес</div>
+    <div class="field"><label>Имейл</label><input id="au-email" type="email" autocomplete="username" placeholder="you@company.bg" /></div>
+    <div class="field"><label>Парола</label><input id="au-pass" type="password" autocomplete="current-password" placeholder="••••••••" /></div>
+    <div id="au-name-wrap" class="field" style="display:none;"><label>Име</label><input id="au-name" placeholder="Име Фамилия" /></div>
+    <button id="au-submit" class="primary" style="width:100%;justify-content:center;margin-top:6px;">Вход</button>
+    <div class="muted" style="margin-top:14px;text-align:center;">
+      <span id="au-toggle-text">Нямаш акаунт?</span>
+      <a href="#" id="au-toggle">Регистрация</a>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== SHELL ==================== -->
+<div id="shell">
+  <aside>
+    <div class="brand"><span class="logo">A</span>AI Finance OS</div>
+    <div class="nav-sec">Основно</div>
+    <nav id="nav"></nav>
+    <div class="side-foot">
+      <div class="userchip">
+        <div class="avatar" id="side-avatar">?</div>
+        <div style="min-width:0;">
+          <div id="side-name" style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
+          <div class="muted" style="font-size:11.5px;">Собственик</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+  <div>
+    <header class="topbar">
+      <div class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="global-search" placeholder="Търсене…" />
+      </div>
+      <div class="topbar-r">
+        <button class="icon-btn" title="Известия" id="btn-bell"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></button>
+        <button class="icon-btn" title="Помощ" id="btn-help"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></button>
+        <button class="icon-btn" title="Настройки" id="btn-settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+        <div class="company-sel">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="var(--muted)" stroke-width="2"><path d="M3 21h18M5 21V7l8-4v18M19 21V11l-6-4"/></svg>
+          <select id="company-select"></select>
+        </div>
+        <button class="icon-btn" id="new-company" title="Нова компания"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>
+        <div class="avatar sm" id="top-avatar" title="Изход" style="cursor:pointer;">?</div>
+      </div>
+    </header>
+    <main id="main"></main>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const API = '/api/v1';
+let token = localStorage.getItem('aifos_token') || null;
+let companyId = localStorage.getItem('aifos_company') || null;
+let companies = [], me = null, accountsCache = null;
+
+/* ---------- icons ---------- */
+const ICON = {
+  home:'M3 11.5 12 4l9 7.5M5 10v10h5v-6h4v6h5V10',
+  book:'M4 5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zM4 17h14',
+  users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.9M16 3.1A4 4 0 0 1 16 11',
+  receipt:'M5 3v18l2-1.5L9 21l2-1.5L13 21l2-1.5L17 21l2-1.5V3l-2 1.5L15 3l-2 1.5L11 3 9 4.5 7 3zM8 8h8M8 12h8',
+  cart:'M2 3h2l2.4 12.4a2 2 0 0 0 2 1.6h8.7a2 2 0 0 0 2-1.6L22 7H6M9 21h.01M18 21h.01',
+  bank:'M3 21h18M5 21V9l7-5 7 5v12M9 21v-6h6v6',
+  percent:'M19 5 5 19M9 7.5A1.5 1.5 0 1 1 6 7.5a1.5 1.5 0 0 1 3 0M18 16.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0',
+  chart:'M3 3v18h18M7 15l3-4 3 2 4-6',
+  doc:'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h6',
+  brain:'M9.5 4a2.5 2.5 0 0 0-2.5 2.5A2.5 2.5 0 0 0 5 9a2.5 2.5 0 0 0 1.5 2.3M9.5 4A2.5 2.5 0 0 1 12 6.5v11M9.5 20A2.5 2.5 0 0 1 7 17.5M14.5 4A2.5 2.5 0 0 1 17 6.5 2.5 2.5 0 0 1 19 9a2.5 2.5 0 0 1-1.5 2.3',
+  card:'M2 6h20v12H2zM2 10h20',
+  shield:'M12 3 5 6v5c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z',
+  team:'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M23 21v-2a4 4 0 0 0-3-3.9',
+  scan:'M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M3 12h18',
+  cash:'M2 6h20v12H2zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M6 9v.01M18 15v.01',
+  wallet:'M3 7a2 2 0 0 1 2-2h14v4M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4M17 13h4v-2a2 2 0 0 0-2-2h-2a2 2 0 0 0 0 4z',
+  trend:'M3 17l6-6 4 4 8-8M15 7h6v6',
+  in:'M12 5v9m0 0 4-4m-4 4L8 10M4 20h16',
+  out:'M12 19V6m0 0 4 4m-4-4L8 10M4 4h16',
+  check:'M20 6 9 17l-5-5', download:'M12 3v12m0 0 4-4m-4 4-4-4M4 21h16', eye:'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6',
+  more:'M12 12h.01M19 12h.01M5 12h.01', plus:'M12 5v14M5 12h14', logout:'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+  alert:'M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
+  spark:'M12 3v3M12 18v3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M3 12h3M18 12h3M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1'
+};
+function ic(name, cls){ return `<svg class="${cls||''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${ICON[name]||''}"/></svg>`; }
+
+/* ---------- nav ---------- */
+const NAV = [
+  {sec:'Основно', items:[
+    ['dashboard','Начало','home'], ['accounting','Счетоводство','book'], ['contacts','Контрагенти','users'],
+  ]},
+  {sec:'Продажби и покупки', items:[
+    ['invoices','Фактури','receipt'], ['purchases','Покупки','cart'], ['banking','Банки и каси','bank'], ['payments','Плащания','card'],
+  ]},
+  {sec:'Данъци и отчети', items:[
+    ['vat','ДДС / Декларация','percent'], ['income73','Справка чл.73','receipt'], ['reports','Отчети','chart'], ['analytics','AI Анализи','brain'],
+  ]},
+  {sec:'Документи и система', items:[
+    ['documents','Документи','doc'], ['team','Екип','team'], ['audit','Одит','shield'],
+  ]},
+];
+function buildNav(){
+  const nav = document.getElementById('nav');
+  nav.innerHTML = NAV.map((g,gi)=>`${gi?`<div class="nav-sec">${g.sec}</div>`:''}${g.items.map(([v,l,i])=>`<a data-view="${v}">${ic(i)}<span>${l}</span></a>`).join('')}`).join('');
+  nav.querySelectorAll('a').forEach(a => a.onclick = (e)=>{ e.preventDefault(); navigate(a.dataset.view); });
+}
+
+/* ---------- helpers ---------- */
+function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstChild; }
+function fmt(n){ return new Intl.NumberFormat('bg-BG',{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(n||0)); }
+function fmt0(n){ return new Intl.NumberFormat('bg-BG',{maximumFractionDigits:0}).format(Number(n||0)); }
+function esc(s){ return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function initials(s){ return (String(s||'?').trim().split(/[\s@.]+/).filter(Boolean).slice(0,2).map(x=>x[0]).join('')||'?').toUpperCase(); }
+function toast(msg, err){
+  const t = el(`<div class="toast ${err?'err':''}">${ic(err?'alert':'check')}<span>${esc(msg)}</span></div>`);
+  document.getElementById('toast').appendChild(t); setTimeout(()=>t.remove(), 3600);
+}
+async function api(path,{method='GET',body,form}={}){
+  const headers={}; if(token) headers['Authorization']='Bearer '+token; if(companyId) headers['X-Company-Id']=companyId;
+  const opts={method,headers};
+  if(form) opts.body=form; else if(body!==undefined){ headers['Content-Type']='application/json'; opts.body=JSON.stringify(body); }
+  const res=await fetch(API+path,opts); const text=await res.text();
+  let data=null; try{ data=text?JSON.parse(text):null; }catch{ data=text; }
+  if(!res.ok){ const msg=(data&&data.detail)?(Array.isArray(data.detail)?data.detail.map(d=>d.msg).join('; '):data.detail):('Грешка '+res.status); throw new Error(msg); }
+  return data;
+}
+async function blobDownload(path, filename){
+  const res=await fetch(API+path,{headers:{Authorization:'Bearer '+token,'X-Company-Id':companyId}});
+  if(!res.ok){ toast('Грешка при генериране на файла',true); return; }
+  const url=URL.createObjectURL(await res.blob()); const a=document.createElement('a');
+  a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000); toast(filename+' е свален');
+}
+const STAT = { // status → pill class
+  ISSUED:'s-violet', PAID:'s-green', PARTIALLY_PAID:'s-blue', DRAFT:'s-gray', CANCELLED:'s-gray', OVERDUE:'s-red',
+  PREPARED:'s-amber', APPROVED:'s-green', REJECTED:'s-red', POSTED:'s-green', MATCHED:'s-green', UNMATCHED:'s-gray',
+  PARTIALLY_MATCHED:'s-blue', IGNORED:'s-gray', RECOGNIZED:'s-green', NEEDS_REVIEW:'s-amber', RECEIVED:'s-gray',
+  OCR_PROCESSING:'s-blue', PROPOSED:'s-violet', MOBILE:'s-violet'
+};
+const STAT_BG = {DRAFT:'Чернова',ISSUED:'Издадена',PAID:'Платена',PARTIALLY_PAID:'Частично платена',CANCELLED:'Анулирана',
+  PREPARED:'Подготвено',APPROVED:'Одобрено',REJECTED:'Отхвърлено',POSTED:'Осчетоводена',
+  UNMATCHED:'Несъпоставено',PARTIALLY_MATCHED:'Частично',MATCHED:'Съпоставено',IGNORED:'Игнорирано',
+  RECOGNIZED:'Разпознат',NEEDS_REVIEW:'За проверка',RECEIVED:'Приет',OCR_PROCESSING:'OCR…',PROPOSED:'Предложен'};
+const pill = (s)=>`<span class="pill ${STAT[s]||'s-gray'}">${esc(STAT_BG[s]||s)}</span>`;
+const ROLES = ['OWNER','MANAGER','CFO','CHIEF_ACCOUNTANT','ACCOUNTANT','EXTERNAL_ACCOUNTANT','AUDITOR','TAX_CONSULTANT','EMPLOYEE_SUBMITTER','EMPLOYEE_APPROVER','SYS_ADMIN','SECURITY_ADMIN','READ_ONLY'];
+const optlist = (arr,v,l)=>arr.map(x=>`<option value="${x[v]}">${esc(x[l])}</option>`).join('');
+const pageH = (title, sub, right='')=>`<div class="page-h"><div><h2>${esc(title)}</h2>${sub?`<div class="sub">${esc(sub)}</div>`:''}</div><div class="flex">${right}</div></div>`;
+const loading = ()=>`<div class="card"><div class="skel" style="width:40%;margin-bottom:12px;"></div><div class="skel" style="width:70%;margin-bottom:8px;"></div><div class="skel" style="width:55%;"></div></div>`;
+const empty = (msg)=>`<div class="empty">${ic('doc')}<div>${esc(msg)}</div></div>`;
+
+/* donut chart from [{label,value,color}] */
+function donut(items, size=150){
+  const total=items.reduce((s,i)=>s+Math.max(0,i.value),0)||1; const r=54, C=2*Math.PI*r; let off=0;
+  const segs=items.map(it=>{ const len=Math.max(0,it.value)/total*C; const s=`<circle cx="75" cy="75" r="${r}" fill="none" stroke="${it.color}" stroke-width="18" stroke-dasharray="${len} ${C-len}" stroke-dashoffset="${-off}" transform="rotate(-90 75 75)"/>`; off+=len; return s; }).join('');
+  return `<svg viewBox="0 0 150 150" width="${size}" height="${size}"><circle cx="75" cy="75" r="${r}" fill="none" stroke="#eef0f3" stroke-width="18"/>${segs}</svg>`;
+}
+const PALETTE = ['#5b52e6','#22b8a6','#f5a623','#4f9df7','#ef6ba0','#8b7bf5','#34c759','#ff9f43','#a3a8b4'];
+
+/* ---------- auth ---------- */
+let registerMode=false;
+document.getElementById('au-toggle').onclick=(e)=>{ e.preventDefault(); registerMode=!registerMode;
+  document.getElementById('au-name-wrap').style.display=registerMode?'block':'none';
+  document.getElementById('au-submit').textContent=registerMode?'Създай акаунт':'Вход';
+  document.getElementById('au-toggle-text').textContent=registerMode?'Вече имаш акаунт?':'Нямаш акаунт?';
+  document.getElementById('au-toggle').textContent=registerMode?'Вход':'Регистрация'; };
+document.getElementById('au-submit').onclick=async()=>{
+  const email=document.getElementById('au-email').value.trim(), password=document.getElementById('au-pass').value;
+  try{ if(registerMode){ await api('/auth/register',{method:'POST',body:{email,password,full_name:document.getElementById('au-name').value||null}}); }
+    const r=await api('/auth/login',{method:'POST',body:{email,password}}); token=r.access_token; localStorage.setItem('aifos_token',token); await boot();
+  }catch(e){ toast(e.message,true); } };
+document.querySelectorAll('#au-email,#au-pass').forEach(i=>i.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('au-submit').click();}));
+
+/* ---------- boot ---------- */
+async function boot(){
+  try{
+    me=await api('/auth/me');
+    document.getElementById('side-name').textContent=me.full_name||me.email;
+    document.getElementById('side-avatar').textContent=initials(me.full_name||me.email);
+    document.getElementById('top-avatar').textContent=initials(me.full_name||me.email);
+    document.getElementById('auth').style.display='none'; document.getElementById('shell').style.display='grid';
+    buildNav(); await loadCompanies(); navigate(location.hash.replace('#','')||'dashboard');
+  }catch{ logout(); }
+}
+function logout(){ token=null; companyId=null; localStorage.removeItem('aifos_token'); localStorage.removeItem('aifos_company');
+  document.getElementById('shell').style.display='none'; document.getElementById('auth').style.display='grid'; }
+document.getElementById('top-avatar').onclick=logout;
+document.getElementById('btn-help').onclick=()=>toast('Документация: docs/ в хранилището');
+document.getElementById('btn-settings').onclick=()=>navigate('team');
+document.getElementById('btn-bell').onclick=()=>toast('Няма нови известия');
+
+async function loadCompanies(){
+  companies=await api('/companies'); const sel=document.getElementById('company-select');
+  sel.innerHTML=companies.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  if(companies.length){ if(!companyId||!companies.find(c=>c.id===companyId)) companyId=companies[0].id; sel.value=companyId; localStorage.setItem('aifos_company',companyId); }
+  else companyId=null;
+}
+document.getElementById('company-select').onchange=(e)=>{ companyId=e.target.value; localStorage.setItem('aifos_company',companyId); accountsCache=null; navigate(currentView); };
+document.getElementById('new-company').onclick=async()=>{ const name=prompt('Име на компанията:'); if(!name) return;
+  try{ const c=await api('/companies',{method:'POST',body:{name}}); await loadCompanies(); companyId=c.id;
+    document.getElementById('company-select').value=c.id; localStorage.setItem('aifos_company',companyId); navigate('accounting'); toast('Компанията е създадена');
+  }catch(e){ toast(e.message,true); } };
+
+/* ---------- router ---------- */
+let currentView='dashboard';
+const VIEWS={ dashboard:viewDashboard, accounting:viewAccounting, contacts:viewContacts, invoices:viewInvoices,
+  purchases:viewPurchases, banking:viewBanking, payments:viewPayments, vat:viewVat, income73:viewIncome73, reports:viewReports,
+  analytics:viewAnalytics, documents:viewDocuments, team:viewTeam, audit:viewAudit };
+function navigate(view){
+  currentView=view; location.hash=view;
+  document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===view));
+  const main=document.getElementById('main');
+  if(!companyId){ main.innerHTML='<div class="card">Създай или избери компания, за да започнеш.</div>'; return; }
+  main.innerHTML=loading();
+  (VIEWS[view]||viewDashboard)(main);
+}
+async function getAccounts(){ if(!accountsCache) accountsCache=await api('/accounting/accounts'); return accountsCache; }
+function accountOptions(a){ return a.filter(x=>!x.is_group).map(x=>`<option value="${x.id}">${esc(x.code)} — ${esc(x.name)}</option>`).join(''); }
+
+/* ==================== НАЧАЛО ==================== */
+async function viewDashboard(main){
+  try{
+    const cc=await api('/ai/command-center');
+    // Текущ и предходен календарен месец за сравнителните KPI
+    const now=new Date(); const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const curFrom=iso(new Date(now.getFullYear(),now.getMonth(),1)), curTo=iso(now);
+    const prevFrom=iso(new Date(now.getFullYear(),now.getMonth()-1,1)), prevTo=iso(new Date(now.getFullYear(),now.getMonth(),0));
+    let ck={}, pk={}, pnl=null, docs=[];
+    try{ [ck,pk]=await Promise.all([api(`/reports/kpis?date_from=${curFrom}&date_to=${curTo}`), api(`/reports/kpis?date_from=${prevFrom}&date_to=${prevTo}`)]); }catch{}
+    try{ pnl=await api(`/reports/profit-and-loss?date_from=${curFrom}&date_to=${curTo}`); }catch{}
+    try{ docs=await api('/documents'); }catch{}
+    const hour=now.getHours(); const greet=hour<11?'Добро утро':hour<18?'Добър ден':'Добър вечер';
+    const cur=cc.currency;
+    const delta=(c,p,goodUp=true)=>{ c=Number(c||0); p=Number(p||0); if(p===0) return c===0?'':'<span class="delta up na" style="background:#f1f2f5;color:#6b7280">нов</span>';
+      const pct=(c-p)/Math.abs(p)*100; const up=pct>=0; const good=(up===goodUp); return `<span class="delta ${good?'up':'down'}">${up?'▲':'▼'} ${Math.abs(pct).toFixed(1)}%</span>`; };
+    const kpi=(l,v,pv,icon,cls,goodUp=true)=>`<div class="card kpi"><div class="top"><div><div class="l">${l}</div><div class="v">${fmt(v)} <span class="muted" style="font-size:14px;font-weight:500;">${cur}</span></div></div><div class="chip ${cls}">${ic(icon)}</div></div><div class="flex" style="gap:7px;">${delta(v,pv,goodUp)}<span class="hint">спрямо предх. месец</span></div></div>`;
+
+    // Разходи по категории от ОПР
+    let donutHtml='', legendHtml='';
+    if(pnl && pnl.expenses.lines.length){
+      const items=pnl.expenses.lines.slice(0,6).map((l,i)=>({label:l.name,value:Number(l.amount),color:PALETTE[i%PALETTE.length]}));
+      const tot=items.reduce((s,i)=>s+i.value,0)||1;
+      donutHtml=`<div style="position:relative;display:grid;place-items:center;">${donut(items,160)}<div style="position:absolute;text-align:center;"><div class="muted" style="font-size:11px;">Разходи</div><div style="font-weight:700;font-size:17px;">${fmt0(tot)}</div></div></div>`;
+      legendHtml=`<div class="legend" style="flex:1;">${items.map(i=>`<div class="li"><span><span class="dot" style="background:${i.color}"></span>${esc(i.label)}</span><b>${Math.round(i.value/tot*100)}%</b></div>`).join('')}</div>`;
+    } else { donutHtml=empty('Няма осчетоводени разходи'); }
+
+    // Приходи / Разходи / Печалба барове
+    let barsHtml='';
+    if(pnl){ const rev=Number(pnl.revenue.total), exp=Number(pnl.expenses.total), pr=Number(pnl.net_profit); const mx=Math.max(rev,exp,Math.abs(pr),1);
+      const bar=(l,v,c)=>`<div class="bar-row"><div class="lab"><span>${l}</span><b>${fmt(v)} ${cur}</b></div><div class="bar"><span style="width:${Math.max(2,Math.abs(v)/mx*100)}%;background:${c}"></span></div></div>`;
+      barsHtml=bar('Приходи',rev,'#22b8a6')+bar('Разходи',exp,'#f5a623')+bar(pr>=0?'Печалба':'Загуба',pr,pr>=0?'#5b52e6':'#dc2626');
+    } else barsHtml=empty('Няма данни за периода');
+
+    const rec=(cc.recommendations||[]).slice(0,3), rsk=(cc.risks||[]).slice(0,3);
+    main.innerHTML=`
+      ${pageH(greet+' 👋', cc.company_name, `<div class="hint">${new Date().toLocaleDateString('bg-BG',{day:'numeric',month:'long',year:'numeric'})}</div>`)}
+      <div class="kpis" style="margin-bottom:16px;">
+        ${kpi('Наличности',ck.cash,pk.cash,'cash','c-violet',true)}
+        ${kpi('Приходи (месец)',ck.revenue,pk.revenue,'in','c-green',true)}
+        ${kpi('Разходи (месец)',ck.expenses,pk.expenses,'out','c-amber',false)}
+        ${kpi('Печалба (месец)',ck.profit,pk.profit,'trend',Number(ck.profit)>=0?'c-teal':'c-red',true)}
+        ${kpi('Вземания',ck.receivables,pk.receivables,'wallet','c-blue',true)}
+        ${kpi('Задължения',ck.payables,pk.payables,'card','c-red',false)}
+      </div>
+      <div class="cols" style="margin-bottom:16px;">
+        <div class="card"><div class="card-t"><h3>Приходи срещу разходи</h3><span class="pill s-violet na">ОПР текущ период</span></div>${barsHtml}</div>
+        <div class="card"><div class="card-t"><h3>Разходи по категории</h3></div><div class="flex" style="gap:20px;align-items:center;">${donutHtml}${legendHtml}</div></div>
+      </div>
+      <div class="cols-3">
+        <div class="card stack">
+          <div class="card-t"><div class="flex">${ic('brain')}<h3 style="margin-left:2px;">AI Асистент</h3></div><span class="pill s-violet na">Command Center</span></div>
+          <div style="color:var(--ink-2);">${esc(cc.summary)}</div>
+          ${rec.length?`<div><h4 class="muted" style="margin-bottom:6px;">Препоръки</h4><ul class="check">${rec.map(r=>`<li>${ic('check')}<span>${esc(r)}</span></li>`).join('')}</ul></div>`:''}
+          ${rsk.length?`<div><h4 class="muted" style="margin-bottom:6px;">Рискове</h4><ul class="check">${rsk.map(r=>`<li style="color:var(--warn)">${ic('alert')}<span style="color:var(--ink-2)">${esc(r)}</span></li>`).join('')}</ul></div>`:''}
+          <button class="sm" onclick="navigate('analytics')">Попитай AI CFO →</button>
+        </div>
+        <div class="card">
+          <div class="card-t"><h3>Последни документи</h3><span class="pill s-gray na">${cc.pending_documents} чакащи</span></div>
+          ${docs.length?`<div class="legend">${docs.slice(0,6).map(d=>`<div class="li" style="border-bottom:1px solid var(--line);padding:8px 0;"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${ic('doc')} ${esc(d.original_filename)}</span>${pill(d.status)}</div>`).join('')}</div>`:empty('Няма документи')}
+          <button class="sm" style="margin-top:12px;" onclick="navigate('documents')">Всички документи →</button>
+        </div>
+      </div>`;
+  }catch(e){ main.innerHTML=`<div class="card">${pageH('Начало','')}<div class="empty">${ic('home')}<div>Няма данни още. ${esc(e.message)}</div><button class="primary" style="margin-top:12px;" onclick="navigate('accounting')">Към счетоводството</button></div></div>`; }
+}
+
+/* ==================== СЧЕТОВОДСТВО ==================== */
+async function viewAccounting(main){
+  main.innerHTML=pageH('Счетоводство','Сметкоплан, операции и оборотна ведомост',
+    `<button id="seed">Сметкоплан</button><button id="fy">Фискална 2026</button><button id="new-entry" class="primary">${ic('plus')}Нова операция</button>`)
+    +`<div id="entry-form"></div><div class="card"><div class="card-t"><h3>Оборотна ведомост</h3></div><div id="tb">${loading()}</div></div>`;
+  document.getElementById('seed').onclick=async()=>{ try{ await api('/accounting/chart/seed',{method:'POST'}); accountsCache=null; toast('Сметкопланът е зареден'); loadTB(); }catch(e){ toast(e.message,true); } };
+  document.getElementById('fy').onclick=async()=>{ try{ await api('/accounting/fiscal-years',{method:'POST',body:{year:2026}}); toast('Фискална 2026 е създадена'); }catch(e){ toast(e.message,true); } };
+  document.getElementById('new-entry').onclick=()=>entryForm();
+  loadTB();
+}
+async function loadTB(){
+  const box=document.getElementById('tb'); if(!box) return;
+  try{ const tb=await api('/reports/trial-balance');
+    if(!tb.rows.length){ box.innerHTML=empty('Няма осчетоводени операции.'); return; }
+    box.innerHTML=`<table><thead><tr><th>Сметка</th><th>Наименование</th><th class="num">Дт оборот</th><th class="num">Кт оборот</th><th class="num">Салдо</th></tr></thead><tbody>
+      ${tb.rows.map(r=>`<tr><td class="strong">${esc(r.code)}</td><td>${esc(r.name)}</td><td class="num">${fmt(r.debit_turnover)}</td><td class="num">${fmt(r.credit_turnover)}</td><td class="num">${fmt(r.closing_balance)}</td></tr>`).join('')}
+      <tr style="font-weight:700"><td colspan="2">ОБЩО</td><td class="num">${fmt(tb.total_debit_turnover)}</td><td class="num">${fmt(tb.total_credit_turnover)}</td><td class="num">${tb.is_balanced?'<span class="badge-ok">баланс</span>':'<span class="badge-bad">небаланс</span>'}</td></tr></tbody></table>`;
+  }catch(e){ box.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+}
+async function entryForm(){
+  const accounts=await getAccounts(); if(!accounts.length){ toast('Първо инициализирай сметкоплан',true); return; }
+  const opts=accountOptions(accounts);
+  document.getElementById('entry-form').innerHTML=`<div class="card stack" style="margin-bottom:16px;"><h3>Нова счетоводна операция</h3>
+    <div class="row"><div class="field" style="flex:1"><label>Дата на документа</label><input id="e-date" type="date" value="2026-07-15" /></div>
+      <div class="field" style="flex:1"><label>Номер</label><input id="e-num" placeholder="напр. F-1" /></div></div>
+    <div class="row"><div class="field" style="flex:2"><label>Дебит сметка</label><select id="e-dr">${opts}</select></div>
+      <div class="field" style="flex:2"><label>Кредит сметка</label><select id="e-cr">${opts}</select></div>
+      <div class="field" style="flex:1"><label>Сума</label><input id="e-amt" type="number" step="0.01" value="100.00" /></div></div>
+    <div class="flex"><button id="e-save" class="primary">Осчетоводи</button><button id="e-cancel" class="ghost">Отказ</button></div></div>`;
+  document.getElementById('e-cancel').onclick=()=>document.getElementById('entry-form').innerHTML='';
+  document.getElementById('e-save').onclick=async()=>{
+    const amt=document.getElementById('e-amt').value;
+    const body={document_date:document.getElementById('e-date').value,document_number:document.getElementById('e-num').value||null,
+      lines:[{account_id:document.getElementById('e-dr').value,debit:amt,credit:'0'},{account_id:document.getElementById('e-cr').value,debit:'0',credit:amt}]};
+    try{ const e=await api('/accounting/journal-entries',{method:'POST',body}); await api(`/accounting/journal-entries/${e.id}/post`,{method:'POST'});
+      toast('Операцията е осчетоводена'); document.getElementById('entry-form').innerHTML=''; loadTB();
+    }catch(err){ toast(err.message,true); } };
+}
+
+/* ==================== КОНТРАГЕНТИ ==================== */
+async function viewContacts(main){
+  const list=await api('/counterparties');
+  main.innerHTML=pageH('Контрагенти','Клиенти и доставчици')+`
+    <div class="card" style="margin-bottom:16px;"><h3 style="margin-bottom:14px;">Нов контрагент</h3><div class="row">
+      <div class="field"><label>Тип</label><select id="c-type"><option value="CUSTOMER">Клиент</option><option value="SUPPLIER">Доставчик</option><option value="BOTH">И двете</option></select></div>
+      <div class="field" style="flex:2"><label>Наименование</label><input id="c-name"/></div>
+      <div class="field"><label>ЕИК</label><input id="c-eik"/></div>
+      <div class="field"><label>ДДС №</label><input id="c-vat"/></div>
+      <div class="field" style="flex:2"><label>IBAN</label><input id="c-iban"/></div>
+      <button id="c-add" class="primary">${ic('plus')}Създай</button></div></div>
+    <div class="card"><div class="card-t"><h3>Списък</h3><span class="pill s-gray na">${list.length}</span></div>${list.length?`<table><thead><tr><th>Наименование</th><th>Тип</th><th>ЕИК</th><th>ДДС №</th></tr></thead><tbody>${list.map(c=>`<tr><td class="strong">${esc(c.name)}</td><td>${pill(c.type)}</td><td>${esc(c.eik||'')}</td><td>${esc(c.vat_number||'')}</td></tr>`).join('')}</tbody></table>`:empty('Няма контрагенти.')}</div>`;
+  document.getElementById('c-add').onclick=async()=>{
+    const body={type:document.getElementById('c-type').value,name:document.getElementById('c-name').value};
+    const eik=document.getElementById('c-eik').value; if(eik) body.eik=eik;
+    const vat=document.getElementById('c-vat').value; if(vat) body.vat_number=vat;
+    const iban=document.getElementById('c-iban').value; if(iban) body.bank_accounts=[{iban,is_primary:true}];
+    try{ await api('/counterparties',{method:'POST',body}); toast('Създаден'); viewContacts(main); }catch(e){ toast(e.message,true); } };
+}
+
+/* ==================== ФАКТУРИ ==================== */
+let invTab='ALL';
+async function viewInvoices(main){
+  const contacts=await api('/counterparties');
+  const customers=contacts.filter(c=>c.type==='CUSTOMER'||c.type==='BOTH');
+  const cmap=Object.fromEntries(contacts.map(c=>[c.id,c.name]));
+  const sales=(await api('/vat/codes')).filter(c=>c.direction==='SALE');
+  const invoices=await api('/invoices');
+  const tabs=[['ALL','Всички'],['DRAFT','Чернови'],['ISSUED','Издадени'],['PAID','Платени'],['CANCELLED','Анулирани']];
+  const filtered=invoices.filter(i=>invTab==='ALL'||i.status===invTab);
+  main.innerHTML=pageH('Фактури','Издадени фактури към клиенти',`<button id="i-new" class="primary">${ic('plus')}Нова фактура</button>`)
+    +`<div id="inv-form"></div>
+    <div class="card"><div class="tabs">${tabs.map(([k,l])=>`<div class="tab ${invTab===k?'active':''}" data-t="${k}">${l}</div>`).join('')}</div>
+    ${filtered.length?`<table><thead><tr><th>№ фактура</th><th>Клиент</th><th>Дата</th><th class="num">Сума</th><th>Статус</th><th class="num">Действия</th></tr></thead><tbody>
+      ${filtered.map(i=>`<tr><td class="strong">${esc(i.full_number||'—')}</td><td>${esc(cmap[i.counterparty_id]||'')}</td><td class="muted">${esc(i.issue_date||'')}</td><td class="num">${fmt(i.total)} ${esc(i.currency)}</td><td>${pill(i.status)}</td>
+        <td class="num"><div class="flex" style="justify-content:flex-end;gap:6px;">${i.status==='DRAFT'?`<button class="sm issue" data-id="${i.id}">Издай</button>`:''}<button class="icon-btn pdf" data-id="${i.id}" title="PDF">${ic('download')}</button></div></td></tr>`).join('')}</tbody></table>`:empty('Няма фактури в тази категория.')}</div>`;
+  main.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{ invTab=t.dataset.t; viewInvoices(main); });
+  document.getElementById('i-new').onclick=()=>{
+    if(!customers.length){ toast('Първо създай клиент в „Контрагенти"',true); return; }
+    document.getElementById('inv-form').innerHTML=`<div class="card stack" style="margin-bottom:16px;"><h3>Нова фактура</h3>
+      <div class="row"><div class="field" style="flex:2"><label>Клиент</label><select id="i-cp">${optlist(customers,'id','name')}</select></div>
+        <div class="field"><label>ДДС код</label><select id="i-vat">${optlist(sales,'id','name')}</select></div>
+        <div class="field"><label>Дата</label><input id="i-date" type="date" value="2026-07-15"/></div></div>
+      <div class="row"><div class="field" style="flex:3"><label>Описание</label><input id="i-desc" value="Услуга"/></div>
+        <div class="field"><label>К-во</label><input id="i-qty" type="number" step="0.001" value="1"/></div>
+        <div class="field"><label>Ед. цена</label><input id="i-price" type="number" step="0.01" value="1000.00"/></div></div>
+      <div class="flex"><button id="i-add" class="primary">Създай чернова</button><button class="ghost" onclick="document.getElementById('inv-form').innerHTML=''">Отказ</button></div></div>`;
+    document.getElementById('i-add').onclick=async()=>{
+      const body={counterparty_id:document.getElementById('i-cp').value,vat_code_id:document.getElementById('i-vat').value,issue_date:document.getElementById('i-date').value,
+        lines:[{description:document.getElementById('i-desc').value,quantity:document.getElementById('i-qty').value,unit_price:document.getElementById('i-price').value}]};
+      try{ await api('/invoices',{method:'POST',body}); toast('Черновата е създадена'); viewInvoices(main); }catch(e){ toast(e.message,true); } };
+  };
+  main.querySelectorAll('.issue').forEach(b=>b.onclick=async()=>{ try{ await api(`/invoices/${b.dataset.id}/issue`,{method:'POST'}); toast('Издадена и осчетоводена'); viewInvoices(main); }catch(e){ toast(e.message,true); } });
+  main.querySelectorAll('.pdf').forEach(b=>b.onclick=()=>blobDownload(`/invoices/${b.dataset.id}/pdf`,`фактура-${b.dataset.id}.pdf`));
+}
+
+/* ==================== ПОКУПКИ ==================== */
+async function viewPurchases(main){
+  const contacts=await api('/counterparties');
+  const suppliers=contacts.filter(c=>c.type==='SUPPLIER'||c.type==='BOTH');
+  const cmap=Object.fromEntries(contacts.map(c=>[c.id,c.name]));
+  const purch=(await api('/vat/codes')).filter(c=>c.direction==='PURCHASE');
+  const accounts=(await getAccounts()).filter(a=>!a.is_group&&a.type==='EXPENSE');
+  const invoices=await api('/purchase-invoices');
+  main.innerHTML=pageH('Покупки','Получени фактури от доставчици',`<button id="p-new" class="primary">${ic('plus')}Нова покупка</button>`)
+    +`<div id="pur-form"></div>
+    <div class="card"><div class="card-t"><h3>Списък</h3><span class="pill s-gray na">${invoices.length}</span></div>${invoices.length?`<table><thead><tr><th>Док. №</th><th>Доставчик</th><th class="num">Сума</th><th>Статус</th><th class="num">Действия</th></tr></thead><tbody>${invoices.map(i=>`<tr><td class="strong">${esc(i.supplier_document_number)}</td><td>${esc(cmap[i.counterparty_id]||'')}</td><td class="num">${fmt(i.total)} ${esc(i.currency)}</td><td>${pill(i.status)}</td><td class="num">${i.status==='DRAFT'?`<button class="sm post" data-id="${i.id}">Осчетоводи</button>`:''}</td></tr>`).join('')}</tbody></table>`:empty('Няма покупки.')}</div>`;
+  document.getElementById('p-new').onclick=()=>{
+    if(!suppliers.length){ toast('Първо създай доставчик в „Контрагенти"',true); return; }
+    document.getElementById('pur-form').innerHTML=`<div class="card stack" style="margin-bottom:16px;"><h3>Нова покупка</h3>
+      <div class="row"><div class="field" style="flex:2"><label>Доставчик</label><select id="p-cp">${optlist(suppliers,'id','name')}</select></div>
+        <div class="field"><label>Док. № (доставчик)</label><input id="p-num" value="SF-1"/></div>
+        <div class="field"><label>ДДС код</label><select id="p-vat">${optlist(purch,'id','name')}</select></div>
+        <div class="field"><label>Дата</label><input id="p-date" type="date" value="2026-07-15"/></div></div>
+      <div class="row"><div class="field" style="flex:2"><label>Разходна сметка</label><select id="p-exp"><option value="">по подразбиране (602)</option>${optlist(accounts.map(a=>({id:a.id,name:a.code+' — '+a.name})),'id','name')}</select></div>
+        <div class="field" style="flex:2"><label>Описание</label><input id="p-desc" value="Услуга"/></div>
+        <div class="field"><label>Сума (нето)</label><input id="p-price" type="number" step="0.01" value="500.00"/></div></div>
+      <div class="flex"><button id="p-add" class="primary">Създай чернова</button><button class="ghost" onclick="document.getElementById('pur-form').innerHTML=''">Отказ</button></div></div>`;
+    document.getElementById('p-add').onclick=async()=>{
+      const body={counterparty_id:document.getElementById('p-cp').value,supplier_document_number:document.getElementById('p-num').value,
+        vat_code_id:document.getElementById('p-vat').value,document_date:document.getElementById('p-date').value,
+        lines:[{description:document.getElementById('p-desc').value,quantity:'1',unit_price:document.getElementById('p-price').value}]};
+      const exp=document.getElementById('p-exp').value; if(exp) body.expense_account_id=exp;
+      try{ await api('/purchase-invoices',{method:'POST',body}); toast('Черновата е създадена'); viewPurchases(main); }catch(e){ toast(e.message,true); } };
+  };
+  main.querySelectorAll('.post').forEach(b=>b.onclick=async()=>{ try{ await api(`/purchase-invoices/${b.dataset.id}/post`,{method:'POST'}); toast('Осчетоводена'); viewPurchases(main); }catch(e){ toast(e.message,true); } });
+}
+
+/* ==================== БАНКИ ==================== */
+async function viewBanking(main){
+  const accs=await api('/banking/accounts');
+  main.innerHTML=pageH('Банки и каси','Импорт на извлечения и съпоставяне')+`
+    <div class="card" style="margin-bottom:16px;"><div class="row">
+      <div class="field grow"><label>Нова банкова сметка</label><input id="ba-name" placeholder="напр. Разплащателна EUR" /></div>
+      <button id="ba-add" class="primary">${ic('plus')}Създай</button></div></div>
+    ${accs.length?`
+    <div class="cols" style="margin-bottom:16px;">
+      <div class="card"><h3 style="margin-bottom:14px;">Ръчно движение</h3>
+        <div class="row"><div class="field grow"><label>Сметка</label><select id="tx-acc">${accs.map(a=>`<option value="${a.id}">${esc(a.name)} (${esc(a.currency)})</option>`).join('')}</select></div>
+          <div class="field"><label>Дата</label><input id="tx-date" type="date" value="2026-07-15"/></div></div>
+        <div class="row"><div class="field"><label>Сума (± знак)</label><input id="tx-amt" type="number" step="0.01" value="1000.00"/></div>
+          <div class="field grow"><label>Основание</label><input id="tx-ref" placeholder="напр. F-1"/></div>
+          <button id="tx-imp" class="primary">Импортирай</button></div></div>
+      <div class="card"><h3 style="margin-bottom:14px;">Импорт от файл</h3>
+        <div class="row"><div class="field"><label>Сметка</label><select id="f-acc">${accs.map(a=>`<option value="${a.id}">${esc(a.name)}</option>`).join('')}</select></div>
+          <div class="field"><label>Формат</label><select id="f-fmt"><option value="csv">CSV</option><option value="mt940">MT940</option><option value="camt">CAMT.053</option></select></div>
+          <div class="field grow"><label>Файл</label><input id="f-file" type="file"/></div></div>
+        <div id="csv-map" class="row"><div class="field"><label>Кол. дата</label><input id="m-date" value="date"/></div>
+          <div class="field"><label>Кол. сума</label><input id="m-amt" value="amount"/></div>
+          <div class="field"><label>Кол. основание</label><input id="m-ref" value="ref"/></div>
+          <div class="field" style="max-width:80px"><label>Раздел.</label><input id="m-delim" value=","/></div>
+          <div class="field"><label>Формат дата</label><input id="m-df" value="%Y-%m-%d"/></div>
+          <div class="field"><label>Дес. „,"</label><select id="m-dc"><option value="false">не</option><option value="true">да</option></select></div></div>
+        <button id="f-imp" class="primary" style="margin-top:6px;">Импортирай файл</button></div>
+    </div>
+    <div class="card"><div class="card-t"><h3>Движения</h3></div><div id="tx-list">${loading()}</div></div>`
+    :`<div class="card">${empty('Създай банкова сметка, за да импортираш движения.')}</div>`}
+    <div id="match-box"></div>`;
+  document.getElementById('ba-add').onclick=async()=>{ const name=document.getElementById('ba-name').value.trim(); if(!name) return;
+    try{ await api('/banking/accounts',{method:'POST',body:{name}}); toast('Сметката е създадена'); viewBanking(main); }catch(e){ toast(e.message,true); } };
+  if(accs.length){
+    document.getElementById('tx-imp').onclick=async()=>{
+      const body={transactions:[{booking_date:document.getElementById('tx-date').value,amount:document.getElementById('tx-amt').value,reference:document.getElementById('tx-ref').value||null,description:'ръчен импорт'}]};
+      try{ const r=await api(`/banking/accounts/${document.getElementById('tx-acc').value}/import`,{method:'POST',body}); toast(`Импортирани: ${r.imported}, дубликати: ${r.duplicates}`); loadTx(); }catch(e){ toast(e.message,true); } };
+    document.getElementById('f-fmt').onchange=(e)=>{ document.getElementById('csv-map').style.display=e.target.value==='csv'?'flex':'none'; };
+    document.getElementById('f-imp').onclick=async()=>{
+      const acc=document.getElementById('f-acc').value, fmtv=document.getElementById('f-fmt').value, file=document.getElementById('f-file').files[0];
+      if(!file){ toast('Избери файл',true); return; } const fd=new FormData(); fd.append('file',file); let path;
+      if(fmtv==='csv'){ path=`/banking/accounts/${acc}/import-csv`;
+        fd.append('date_column',document.getElementById('m-date').value); fd.append('amount_column',document.getElementById('m-amt').value);
+        fd.append('reference_column',document.getElementById('m-ref').value); fd.append('delimiter',document.getElementById('m-delim').value);
+        fd.append('date_format',document.getElementById('m-df').value); fd.append('decimal_comma',document.getElementById('m-dc').value);
+      } else path=`/banking/accounts/${acc}/import-${fmtv}`;
+      try{ const r=await api(path,{method:'POST',form:fd}); toast(`Импортирани: ${r.imported}, дубликати: ${r.duplicates}`); loadTx(); }catch(e){ toast(e.message,true); } };
+    loadTx();
+  }
+}
+async function loadTx(){
+  const box=document.getElementById('tx-list'); if(!box) return;
+  const txs=await api('/banking/transactions');
+  if(!txs.length){ box.innerHTML=empty('Няма движения.'); return; }
+  box.innerHTML=`<table><thead><tr><th>Дата</th><th>Основание</th><th class="num">Сума</th><th>Статус</th><th class="num"></th></tr></thead><tbody>
+    ${txs.map(t=>`<tr><td class="muted">${esc(t.booking_date)}</td><td>${esc(t.reference||'')}</td><td class="num">${fmt(t.amount)} ${esc(t.currency)}</td><td>${pill(t.status)}</td>
+      <td class="num">${t.status==='UNMATCHED'||t.status==='PARTIALLY_MATCHED'?`<button class="sm sug" data-id="${t.id}">Съпостави</button>`:''}</td></tr>`).join('')}</tbody></table>`;
+  box.querySelectorAll('.sug').forEach(b=>b.onclick=()=>suggest(b.dataset.id));
+}
+async function suggest(txId){
+  const box=document.getElementById('match-box'); box.innerHTML='<div class="card muted" style="margin-top:16px;">Търсене на съвпадения…</div>';
+  try{ const s=await api(`/banking/transactions/${txId}/suggest-matches`,{method:'POST'});
+    if(!s.length){ box.innerHTML='<div class="card" style="margin-top:16px;">'+empty('Няма предложени съвпадения.')+'</div>'; return; }
+    box.innerHTML=`<div class="card" style="margin-top:16px;"><div class="card-t"><h3>Предложени съвпадения</h3></div>
+      ${s.map(m=>`<div class="flex spread" style="padding:10px 0;border-bottom:1px solid var(--line)"><div>Операция №${m.entry_number??'—'} · ${esc(m.document_number||'')} · <b>${fmt(m.amount)}</b><div class="hint">${esc(m.reasons.join(' · '))}</div></div>
+        <div class="flex"><span class="pill s-violet na">${(m.confidence*100|0)}%</span><button class="primary sm do-match" data-tx="${txId}" data-je="${m.journal_entry_id}">Съпостави</button></div></div>`).join('')}</div>`;
+    box.querySelectorAll('.do-match').forEach(b=>b.onclick=async()=>{ try{ await api(`/banking/transactions/${b.dataset.tx}/match`,{method:'POST',body:{journal_entry_id:b.dataset.je}}); toast('Съпоставено'); box.innerHTML=''; loadTx(); }catch(e){ toast(e.message,true); } });
+  }catch(e){ box.innerHTML=`<div class="card" style="margin-top:16px;">${esc(e.message)}</div>`; }
+}
+
+/* ==================== ПЛАЩАНИЯ ==================== */
+async function viewPayments(main){
+  const contacts=await api('/counterparties');
+  const suppliers=contacts.filter(c=>c.type==='SUPPLIER'||c.type==='BOTH');
+  const payments=await api('/payments');
+  main.innerHTML=pageH('Плащания','Системата само подготвя и одобрява — не извършва реалното плащане.')+`
+    <div class="card" style="margin-bottom:16px;"><h3 style="margin-bottom:14px;">Ново плащане</h3><div class="row">
+      <div class="field" style="flex:2"><label>Доставчик</label><select id="pay-cp">${optlist(suppliers,'id','name')}</select></div>
+      <div class="field"><label>Сума</label><input id="pay-amt" type="number" step="0.01" value="1000.00"/></div>
+      <div class="field" style="flex:2"><label>IBAN (по избор)</label><input id="pay-iban"/></div>
+      <div class="field" style="flex:2"><label>Основание</label><input id="pay-ref"/></div>
+      <button id="pay-add" class="primary">Подготви</button></div></div>
+    <div class="card"><div class="card-t"><h3>Списък</h3></div>${payments.length?`<table><thead><tr><th>Получател</th><th class="num">Сума</th><th>Рискове</th><th>Статус</th><th class="num">Действия</th></tr></thead><tbody>${payments.map(p=>`<tr><td class="strong">${esc(p.recipient_name)}</td><td class="num">${fmt(p.amount)} ${esc(p.currency)}</td><td>${(p.risk_flags||[]).map(f=>`<span class="pill s-amber">${esc(f)}</span>`).join(' ')||'<span class="muted-2">—</span>'}</td><td>${pill(p.status)}</td><td class="num">${p.status==='PREPARED'?`<div class="flex" style="justify-content:flex-end"><button class="sm approve" data-id="${p.id}">Одобри</button><button class="sm reject" data-id="${p.id}">Отхвърли</button></div>`:''}</td></tr>`).join('')}</tbody></table>`:empty('Няма плащания.')}</div>`;
+  document.getElementById('pay-add').onclick=async()=>{
+    if(!suppliers.length){ toast('Първо създай доставчик',true); return; }
+    const body={counterparty_id:document.getElementById('pay-cp').value,amount:document.getElementById('pay-amt').value};
+    const iban=document.getElementById('pay-iban').value; if(iban) body.recipient_iban=iban;
+    const ref=document.getElementById('pay-ref').value; if(ref) body.reference=ref;
+    try{ await api('/payments',{method:'POST',body}); toast('Подготвено'); viewPayments(main); }catch(e){ toast(e.message,true); } };
+  main.querySelectorAll('.approve').forEach(b=>b.onclick=async()=>{ try{ await api(`/payments/${b.dataset.id}/approve`,{method:'POST'}); toast('Одобрено'); viewPayments(main); }catch(e){ toast(e.message,true); } });
+  main.querySelectorAll('.reject').forEach(b=>b.onclick=async()=>{ const reason=prompt('Причина за отхвърляне:'); if(!reason) return; try{ await api(`/payments/${b.dataset.id}/reject`,{method:'POST',body:{reason}}); toast('Отхвърлено'); viewPayments(main); }catch(e){ toast(e.message,true); } });
+}
+
+/* ==================== ДДС / ДЕКЛАРАЦИЯ ==================== */
+async function viewVat(main){
+  let years=[]; try{ years=await api('/accounting/fiscal-years'); }catch(e){ main.innerHTML=pageH('ДДС','')+`<div class="card">${empty(e.message)}</div>`; return; }
+  const periods=years.flatMap(y=>(y.periods||[]).map(p=>({id:p.id,code:p.code})));
+  if(!periods.length){ main.innerHTML=pageH('ДДС / Декларация','')+`<div class="card">${empty('Няма данъчен период. Създай фискална година в „Счетоводство".')}</div>`; return; }
+  periods.sort((a,b)=>b.code.localeCompare(a.code));
+  main.innerHTML=pageH('ДДС / Справка-декларация по ЗДДС','Изчисляване и подаване на файловете за НАП')+`
+    <div class="steps"><div class="step done"><span class="n">1</span>Данни</div><div class="step-sep"></div><div class="step active"><span class="n">2</span>Проверка</div><div class="step-sep"></div><div class="step"><span class="n">3</span>Декларация</div><div class="step-sep"></div><div class="step"><span class="n">4</span>Подписване</div><div class="step-sep"></div><div class="step"><span class="n">5</span>Подаване</div></div>
+    <div class="toolbar"><div class="field" style="margin:0;min-width:180px;"><label>Данъчен период</label><select id="v-period">${periods.map(p=>`<option value="${p.id}">${esc(p.code)}</option>`).join('')}</select></div>
+      <button id="v-load" class="primary" style="align-self:flex-end;">Изчисли декларация</button>
+      <button id="v-nap" style="align-self:flex-end;">${ic('download')}Файлове за НАП (.zip)</button></div>
+    <div id="v-result">${loading()}</div>`;
+  const load=()=>loadVatDeclaration(document.getElementById('v-period').value);
+  document.getElementById('v-load').onclick=load; document.getElementById('v-period').onchange=load;
+  document.getElementById('v-nap').onclick=()=>{ const s=document.getElementById('v-period'); blobDownload(`/vat/returns/${s.value}/nap-files`,`NAP-DDS-${s.selectedOptions[0].text.replace('-','')}.zip`); };
+  load();
+}
+async function loadVatDeclaration(pid){
+  const box=document.getElementById('v-result'); if(!box) return; box.innerHTML=loading();
+  try{ const d=await api(`/vat/returns/${pid}/declaration`);
+    const cell=n=>{ const c=d.cells.find(x=>x.cell===n); return c?Number(c.amount):0; };
+    const payable=cell('50'), refundable=cell('60');
+    const errs=d.controls.filter(c=>c.level==='ERROR'), warns=d.controls.filter(c=>c.level!=='ERROR');
+    box.innerHTML=`<div class="cols" style="margin-bottom:16px;">
+        <div class="card kpi"><div class="top"><div><div class="l">ДДС за внасяне (к.50)</div><div class="v">${fmt(payable)}</div></div><div class="chip c-red">${ic('out')}</div></div></div>
+        <div class="card kpi"><div class="top"><div><div class="l">ДДС за възстановяване (к.60)</div><div class="v">${fmt(refundable)}</div></div><div class="chip c-green">${ic('in')}</div></div></div></div>
+      <div class="card" style="margin-bottom:16px;"><div class="card-t"><h3>Контроли и предупреждения</h3>${d.has_blocking_errors?'<span class="pill s-red">Има грешки</span>':'<span class="pill s-green">Готово за подаване</span>'}</div>
+        <ul class="check">${errs.map(c=>`<li style="color:var(--bad)">${ic('alert')}<span style="color:var(--ink-2)">${esc(c.message)}</span></li>`).join('')}
+        ${warns.map(c=>`<li style="color:var(--warn)">${ic('alert')}<span style="color:var(--ink-2)">${esc(c.message)}</span></li>`).join('')}
+        ${!d.controls.length?`<li>${ic('check')}<span>Всички задължителни полета са попълнени. Няма несъответствия.</span></li>`:''}</ul></div>
+      <div class="card"><div class="card-t"><h3>Клетки — ${esc(d.company_name)} · период ${esc(d.period_code)}</h3></div>
+        <table><thead><tr><th>Клетка</th><th>Описание</th><th class="num">Стойност</th></tr></thead><tbody>${d.cells.map(c=>`<tr><td class="strong">${esc(c.cell)}</td><td>${esc(c.label)}</td><td class="num">${fmt(c.amount)}</td></tr>`).join('')}</tbody></table>
+        <div class="hint" style="margin-top:10px;">Пакетът за НАП: POKUPKI.TXT, PRODAGBI.TXT, DEKLAR.TXT (+ VIES.TXT при ВОД), кодиране Windows-1251.</div></div>`;
+  }catch(e){ box.innerHTML=`<div class="card">${empty(e.message)}</div>`; }
+}
+
+/* ==================== СПРАВКА ЧЛ.73, АЛ.6 ЗДДФЛ ==================== */
+let inc73 = [];
+async function viewIncome73(main){
+  const yr=new Date().getFullYear()-1;
+  main.innerHTML=pageH('Справка по чл. 73, ал. 6 от ЗДДФЛ','Годишни изплатени доходи по трудови правоотношения → SPR73_6.xml за НАП')+`
+    <div class="card" style="margin-bottom:16px;"><div class="row">
+      <div class="field"><label>Година</label><input id="i73-year" type="number" value="${yr}" style="max-width:120px"/></div>
+      <div class="hint" style="align-self:center;">Платецът се попълва автоматично от ЕИК на текущата компания.</div></div></div>
+    <div class="card" style="margin-bottom:16px;"><h3 style="margin-bottom:14px;">Добави лице</h3>
+      <div class="row"><div class="field"><label>Име</label><input id="i73-fn" value="Иван"/></div>
+        <div class="field"><label>Презиме</label><input id="i73-sn"/></div>
+        <div class="field"><label>Фамилия</label><input id="i73-tn" value="Петров"/></div>
+        <div class="field"><label>ЕГН/ЛН</label><input id="i73-id" value="7501011234"/></div>
+        <div class="field"><label>Осн. работодател</label><select id="i73-main"><option value="1">Да</option><option value="0">Не</option></select></div></div>
+      <div class="row"><div class="field"><label>Код доход</label><input id="i73-code" value="101" maxlength="3" style="max-width:100px"/></div>
+        <div class="field"><label>Облагаем доход</label><input id="i73-inc" type="number" step="0.01" value="24000.00"/></div>
+        <div class="field"><label>Осиг. (лице)</label><input id="i73-hi" type="number" step="0.01" value="3120.00"/></div>
+        <div class="field"><label>Авансов данък</label><input id="i73-adv" type="number" step="0.01" value="2029.20"/></div>
+        <div class="field"><label>Удържан данък</label><input id="i73-sum" type="number" step="0.01" value="2029.20"/></div>
+        <button id="i73-add" class="primary">${ic('plus')}Добави</button></div></div>
+    <div class="card"><div class="card-t"><h3>Лица в справката</h3><button id="i73-dl" class="primary" ${inc73.length?'':'disabled'}>${ic('download')}Свали SPR73_6.xml</button></div>
+      <div id="i73-list"></div></div>`;
+  const render=()=>{ const box=document.getElementById('i73-list');
+    box.innerHTML=inc73.length?`<table><thead><tr><th>Лице</th><th>ЕГН/ЛН</th><th>Код</th><th class="num">Доход</th><th class="num">Ав. данък</th><th class="num">Удържан</th><th></th></tr></thead><tbody>${inc73.map((p,i)=>`<tr><td class="strong">${esc(p.firstname)} ${esc(p.thirdname)}</td><td>${esc(p.ident)}</td><td>${esc(p.income_lines[0].incomecode)}</td><td class="num">${fmt(p.income_lines[0].income)}</td><td class="num">${fmt(p.income_lines[0].advancetax)}</td><td class="num">${fmt(p.sumtaxdeducted)}</td><td class="num"><button class="sm i73-rm" data-i="${i}">✕</button></td></tr>`).join('')}</tbody></table>`:empty('Все още няма добавени лица.');
+    document.getElementById('i73-dl').disabled=!inc73.length;
+    box.querySelectorAll('.i73-rm').forEach(b=>b.onclick=()=>{ inc73.splice(+b.dataset.i,1); render(); }); };
+  render();
+  document.getElementById('i73-add').onclick=()=>{
+    const v=id=>document.getElementById(id).value;
+    if(!v('i73-id')||!v('i73-fn')||!v('i73-tn')){ toast('Попълни име и ЕГН/ЛН',true); return; }
+    inc73.push({ correctioncode:0, firstname:v('i73-fn'), secondname:v('i73-sn')||null, thirdname:v('i73-tn'),
+      identtype:0, ident:v('i73-id'), ismainemployer:+v('i73-main'),
+      income_lines:[{ incomecode:v('i73-code'), employereik:(companies.find(c=>c.id===companyId)||{}).eik||'0000000000',
+        employername:(companies.find(c=>c.id===companyId)||{}).name||'', income:v('i73-inc'), advancetax:v('i73-adv'), healthinsbg:v('i73-hi')||null }],
+      sumtaxdeducted:v('i73-sum') });
+    toast('Лицето е добавено'); render();
+  };
+  document.getElementById('i73-dl').onclick=async()=>{
+    const payload={ year:+document.getElementById('i73-year').value, persons:inc73 };
+    try{ const res=await fetch(`${API}/income-reports/chl73-6/xml`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token,'X-Company-Id':companyId},body:JSON.stringify(payload)});
+      if(!res.ok){ const e=await res.json().catch(()=>({})); toast(e.detail||'Грешка',true); return; }
+      const url=URL.createObjectURL(await res.blob()); const a=document.createElement('a'); a.href=url; a.download='SPR73_6.xml'; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),60000); toast('SPR73_6.xml е свален');
+    }catch(e){ toast(e.message,true); } };
+}
+
+/* ==================== ОТЧЕТИ (P&L / Баланс / Паричен поток) ==================== */
+let repTab='pnl', pnlMode='nss';
+async function viewReports(main){
+  const tabs=[['pnl','ОПР'],['balance','Баланс'],['cashflow','Паричен поток'],['tb','Оборотна ведомост']];
+  main.innerHTML=pageH('Отчети','Финансови отчети от осчетоводените операции')+`
+    <div class="toolbar"><div class="field" style="margin:0"><label>От дата</label><input id="r-from" type="date"/></div>
+      <div class="field" style="margin:0"><label>До дата</label><input id="r-to" type="date"/></div>
+      <button id="r-load" class="primary" style="align-self:flex-end;">Обнови</button></div>
+    <div class="tabs">${tabs.map(([k,l])=>`<div class="tab ${repTab===k?'active':''}" data-t="${k}">${l}</div>`).join('')}</div>
+    <div id="r-body">${loading()}</div>`;
+  main.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{ repTab=t.dataset.t; load(); main.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.t===repTab)); });
+  const qstr=()=>{ const f=document.getElementById('r-from').value, t=document.getElementById('r-to').value; const qs=[]; if(f) qs.push('date_from='+f); if(t) qs.push('date_to='+t); return qs.length?'?'+qs.join('&'):''; };
+  const load=async()=>{
+    const box=document.getElementById('r-body'); box.innerHTML=loading(); const q=qstr();
+    try{
+      if(repTab==='pnl'){
+        const p=await api('/reports/profit-and-loss'+q);
+        const secAcc=(s,color)=>`<table><tbody>${s.lines.map(l=>`<tr><td class="strong">${esc(l.code)}</td><td>${esc(l.name)}</td><td class="num">${fmt(l.amount)}</td></tr>`).join('')||`<tr><td colspan="3" class="muted">—</td></tr>`}<tr style="font-weight:700"><td colspan="2">${s.title} общо</td><td class="num" style="color:${color}">${fmt(s.total)}</td></tr></tbody></table>`;
+        const secNss=(groups,total,label,color)=>`<table><tbody>${groups.map(g=>`<tr><td>${esc(g.title)}</td><td class="num">${fmt(g.amount)}</td></tr>`).join('')||`<tr><td colspan="2" class="muted">—</td></tr>`}<tr style="font-weight:700"><td>${label} общо</td><td class="num" style="color:${color}">${fmt(total)}</td></tr></tbody></table>`;
+        const nss=pnlMode==='nss';
+        box.innerHTML=`<div class="flex" style="justify-content:flex-end;margin-bottom:12px;gap:0;">
+            <button class="sm pnl-mode ${nss?'primary':''}" data-m="nss" style="border-radius:8px 0 0 8px;">По статии (НСС)</button>
+            <button class="sm pnl-mode ${!nss?'primary':''}" data-m="acc" style="border-radius:0 8px 8px 0;border-left:none;">По сметки</button></div>
+          <div class="cols" style="margin-bottom:16px;">
+            <div class="card"><div class="card-t"><h3>Приходи</h3><span class="pill s-green na">${fmt(p.revenue.total)}</span></div>${nss?secNss(p.revenue_groups,p.revenue.total,'Приходи','var(--good)'):secAcc(p.revenue,'var(--good)')}</div>
+            <div class="card"><div class="card-t"><h3>Разходи</h3><span class="pill s-amber na">${fmt(p.expenses.total)}</span></div>${nss?secNss(p.expense_groups,p.expenses.total,'Разходи','var(--warn)'):secAcc(p.expenses,'var(--warn)')}</div></div>
+          <div class="card kpi"><div class="top"><div><div class="l">Финансов резултат за периода</div><div class="v" style="color:${p.is_profit?'var(--good)':'var(--bad)'}">${fmt(p.net_profit)}</div></div><div class="chip ${p.is_profit?'c-green':'c-red'}">${ic('trend')}</div></div><div class="hint">${p.is_profit?'Печалба':'Загуба'} · приходи ${fmt(p.revenue.total)} − разходи ${fmt(p.expenses.total)}</div></div>`;
+        box.querySelectorAll('.pnl-mode').forEach(b=>b.onclick=()=>{ pnlMode=b.dataset.m; load(); });
+      } else if(repTab==='balance'){
+        const t=document.getElementById('r-to').value; const bs=await api('/reports/balance-sheet'+(t?'?as_of='+t:''));
+        const sec=(s)=>`<div class="card"><div class="card-t"><h3>${esc(s.title)}</h3><span class="pill s-gray na">${fmt(s.total)}</span></div><table><tbody>${s.lines.map(l=>`<tr><td class="strong">${esc(l.code)}</td><td>${esc(l.name)}</td><td class="num">${fmt(l.amount)}</td></tr>`).join('')||`<tr><td colspan="3" class="muted">—</td></tr>`}</tbody></table></div>`;
+        box.innerHTML=`<div class="cols" style="margin-bottom:16px;">
+            <div class="stack">${bs.assets.map(sec).join('')}<div class="card kpi"><div class="top"><div><div class="l">Сума на активите</div><div class="v">${fmt(bs.assets_total)}</div></div><div class="chip c-blue">${ic('wallet')}</div></div></div></div>
+            <div class="stack">${bs.passives.map(sec).join('')}<div class="card kpi"><div class="top"><div><div class="l">Собствен капитал и пасиви</div><div class="v">${fmt(bs.passives_total)}</div></div><div class="chip c-violet">${ic('bank')}</div></div></div></div></div>
+          <div class="card">${bs.is_balanced?'<span class="badge-ok">✓ Балансът е изравнен (Активи = Пасиви)</span>':'<span class="badge-bad">⚠ Небаланс — провери операциите</span>'}</div>`;
+      } else if(repTab==='cashflow'){
+        const cf=await api('/reports/cash-flow'+q);
+        box.innerHTML=`<div class="cols" style="margin-bottom:16px;">
+            <div class="card kpi"><div class="top"><div><div class="l">Начални парични средства</div><div class="v">${fmt(cf.opening_cash)}</div></div><div class="chip c-gray" style="background:#f1f2f5;color:#6b7280">${ic('cash')}</div></div></div>
+            <div class="card kpi"><div class="top"><div><div class="l">Крайни парични средства</div><div class="v">${fmt(cf.closing_cash)}</div></div><div class="chip ${Number(cf.net_change)>=0?'c-green':'c-red'}">${ic('cash')}</div></div><div class="hint">Изменение за периода: ${fmt(cf.net_change)}</div></div></div>
+          <div class="card"><div class="card-t"><h3>Парични потоци по дейности</h3>${cf.reconciles?'<span class="pill s-green">равни</span>':'<span class="pill s-red">разминаване</span>'}</div>
+            <table><thead><tr><th>Дейност</th><th class="num">Притоци</th><th class="num">Оттоци</th><th class="num">Нето</th></tr></thead><tbody>
+            ${cf.sections.map(s=>`<tr><td class="strong">${esc(s.title)}</td><td class="num" style="color:var(--good)">${fmt(s.inflow)}</td><td class="num" style="color:var(--bad)">${fmt(s.outflow)}</td><td class="num">${fmt(s.net)}</td></tr>`).join('')}
+            <tr style="font-weight:700"><td>Нетно изменение</td><td colspan="2"></td><td class="num">${fmt(cf.net_change)}</td></tr></tbody></table></div>`;
+      } else {
+        const tb=await api('/reports/trial-balance'+q);
+        box.innerHTML=`<div class="card">${tb.rows.length?`<table><thead><tr><th>Сметка</th><th>Наименование</th><th class="num">Дт</th><th class="num">Кт</th><th class="num">Салдо</th></tr></thead><tbody>${tb.rows.map(r=>`<tr><td class="strong">${esc(r.code)}</td><td>${esc(r.name)}</td><td class="num">${fmt(r.debit_turnover)}</td><td class="num">${fmt(r.credit_turnover)}</td><td class="num">${fmt(r.closing_balance)}</td></tr>`).join('')}<tr style="font-weight:700"><td colspan="2">ОБЩО</td><td class="num">${fmt(tb.total_debit_turnover)}</td><td class="num">${fmt(tb.total_credit_turnover)}</td><td class="num">${tb.is_balanced?'<span class="badge-ok">баланс</span>':'<span class="badge-bad">небаланс</span>'}</td></tr></tbody></table>`:empty('Няма данни.')}</div>`;
+      }
+    }catch(e){ box.innerHTML=`<div class="card">${empty(e.message)}</div>`; }
+  };
+  document.getElementById('r-load').onclick=load; load();
+}
+
+/* ==================== AI АНАЛИЗИ (CFO) ==================== */
+async function viewAnalytics(main){
+  main.innerHTML=pageH('AI Анализи','AI CFO — анализ и препоръки върху вашите финансови данни')+`
+    <div class="card" style="margin-bottom:16px;"><div class="field"><label>Въпрос към AI CFO (по избор)</label>
+      <textarea id="q-text" rows="2" placeholder="напр. Как да подобря паричния поток? Има ли данъчни рискове?"></textarea></div>
+      <button id="q-ask" class="primary">${ic('brain')}Анализирай</button></div>
+    <div id="q-out"></div>`;
+  document.getElementById('q-ask').onclick=async()=>{
+    const out=document.getElementById('q-out'); out.innerHTML=loading();
+    try{ const a=await api('/ai/cfo/ask',{method:'POST',body:{question:document.getElementById('q-text').value||null}});
+      out.innerHTML=`<div class="card stack">
+        <div class="card-t"><div class="flex">${ic('brain')}<h3 style="margin-left:2px;">${esc(a.summary)}</h3></div><span class="pill s-violet na">увереност: ${esc(a.confidence)}</span></div>
+        <div style="color:var(--ink-2)">${esc(a.explanation)}</div>
+        ${a.recommendations?.length?`<div><h4 class="muted" style="margin-bottom:6px;">Препоръки</h4><ul class="check">${a.recommendations.map(r=>`<li>${ic('check')}<span>${esc(r)}</span></li>`).join('')}</ul></div>`:''}
+        ${a.risks?.length?`<div><h4 class="muted" style="margin-bottom:6px;">Рискове</h4><ul class="check">${a.risks.map(r=>`<li style="color:var(--warn)">${ic('alert')}<span style="color:var(--ink-2)">${esc(r)}</span></li>`).join('')}</ul></div>`:''}
+        ${a.assumptions?.length?`<div class="hint">Допускания: ${a.assumptions.map(esc).join('; ')}</div>`:''}</div>`;
+    }catch(e){ out.innerHTML=`<div class="card">${empty(e.message)}</div>`; }
+  };
+}
+
+/* ==================== ДОКУМЕНТИ ==================== */
+async function viewDocuments(main){
+  main.innerHTML=pageH('Документи','Качване, мобилно сканиране и AI разпознаване')+`
+    <div class="cols" style="margin-bottom:16px;">
+      <div class="card"><h3 style="margin-bottom:12px;">Качи документ</h3>
+        <div class="row"><div class="field grow"><label>PDF или изображение</label><input id="doc-file" type="file" accept="application/pdf,image/*"/></div>
+        <button id="doc-up" class="primary">Качи</button></div>
+        <div class="hint">Файлът се пази и се обработва с „AI извличане".</div></div>
+      <div class="card"><h3 style="margin-bottom:12px;">${ic('scan')} Сканиране (мобилен поток)</h3>
+        <div class="row"><div class="field grow"><label>Снимка/скан на фактура</label><input id="scan-file" type="file" accept="image/*,application/pdf"/></div>
+        <button id="scan-btn" class="primary">Сканирай + OCR</button></div>
+        <div class="hint">Едно действие: качва изображението и веднага го разпознава (source=MOBILE).</div></div>
+    </div>
+    <div class="card"><div class="card-t"><h3>Списък</h3></div><div id="doc-list">${loading()}</div></div>
+    <div id="doc-detail"></div>`;
+  document.getElementById('doc-up').onclick=async()=>{
+    const f=document.getElementById('doc-file').files[0]; if(!f){ toast('Избери файл',true); return; }
+    const fd=new FormData(); fd.append('file',f);
+    try{ await api('/documents',{method:'POST',form:fd}); toast('Документът е качен'); loadDocs(); }catch(e){ toast(e.message,true); } };
+  document.getElementById('scan-btn').onclick=async()=>{
+    const f=document.getElementById('scan-file').files[0]; if(!f){ toast('Избери снимка/скан',true); return; }
+    const fd=new FormData(); fd.append('file',f); const btn=document.getElementById('scan-btn'); btn.disabled=true; btn.textContent='OCR…';
+    try{ const r=await api('/documents/scan',{method:'POST',form:fd}); toast('Сканирано и разпознато'); showExtraction(r.extraction); loadDocs(); }
+    catch(e){ toast(e.message,true); } finally{ btn.disabled=false; btn.textContent='Сканирай + OCR'; } };
+  loadDocs();
+}
+async function loadDocs(){
+  const box=document.getElementById('doc-list'); if(!box) return;
+  const docs=await api('/documents');
+  if(!docs.length){ box.innerHTML=empty('Няма документи.'); return; }
+  box.innerHTML=`<table><thead><tr><th>Файл</th><th>Източник</th><th>Статус</th><th class="num">Действия</th></tr></thead><tbody>
+    ${docs.map(d=>`<tr><td class="strong">${esc(d.original_filename)}</td><td>${pill(d.source)}</td><td>${pill(d.status)}</td>
+      <td class="num"><div class="flex" style="justify-content:flex-end;gap:6px;"><button class="icon-btn dl" data-id="${d.id}" title="Изтегли">${ic('download')}</button><button class="sm extract" data-id="${d.id}">AI извличане</button></div></td></tr>`).join('')}</tbody></table>`;
+  box.querySelectorAll('.extract').forEach(b=>b.onclick=async()=>{ b.disabled=true; b.textContent='Обработва…';
+    try{ const r=await api(`/ai/documents/${b.dataset.id}/extract`,{method:'POST'}); showExtraction(r); loadDocs(); }
+    catch(e){ toast(e.message,true); b.disabled=false; b.textContent='AI извличане'; } });
+  box.querySelectorAll('.dl').forEach(b=>b.onclick=()=>blobDownload(`/documents/${b.dataset.id}/file`,`документ-${b.dataset.id}`));
+}
+function showExtraction(r){
+  const f=r.data.fields||{}; const rows=Object.entries(f).map(([k,v])=>`<tr><td class="muted">${esc(k)}</td><td class="strong">${esc(v)}</td></tr>`).join('');
+  const conf=Math.round((r.data.overall_confidence||0)*100);
+  document.getElementById('doc-detail').innerHTML=`<div class="card" style="margin-top:16px;"><div class="card-t"><h3>Разпознати данни</h3><span class="pill ${conf>=75?'s-green':'s-amber'}">увереност ${conf}%</span></div>
+    <table><tbody>${rows||`<tr><td class="muted">Няма разпознати полета</td></tr>`}</tbody></table>
+    ${r.data.notes?`<div class="hint" style="margin-top:10px;">${esc(r.data.notes)}</div>`:''}</div>`;
+  document.getElementById('doc-detail').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+/* ==================== ЕКИП ==================== */
+async function viewTeam(main){
+  const members=await api('/members');
+  const roleSel=(cur)=>`<select class="role-sel" style="width:auto">${ROLES.map(r=>`<option ${r===cur?'selected':''}>${r}</option>`).join('')}</select>`;
+  main.innerHTML=pageH('Екип','Потребители и роли (RBAC)')+`
+    <div class="card" style="margin-bottom:16px;"><div class="row">
+      <div class="field" style="flex:2"><label>Имейл на регистриран потребител</label><input id="t-email"/></div>
+      <div class="field"><label>Роля</label><select id="t-role">${ROLES.map(r=>`<option>${r}</option>`).join('')}</select></div>
+      <button id="t-add" class="primary">${ic('plus')}Добави</button></div></div>
+    <div class="card"><table><thead><tr><th>Имейл</th><th>Име</th><th>Роля</th><th class="num"></th></tr></thead><tbody>
+      ${members.map(m=>`<tr data-id="${m.id}"><td class="strong">${esc(m.email)}</td><td>${esc(m.full_name||'')}</td><td>${roleSel(m.role)}</td><td class="num"><button class="sm rm">Премахни</button></td></tr>`).join('')}
+    </tbody></table></div>`;
+  document.getElementById('t-add').onclick=async()=>{ try{ await api('/members',{method:'POST',body:{email:document.getElementById('t-email').value,role:document.getElementById('t-role').value}}); toast('Добавен'); viewTeam(main); }catch(e){ toast(e.message,true); } };
+  main.querySelectorAll('tbody tr').forEach(tr=>{ const id=tr.dataset.id;
+    tr.querySelector('.role-sel').onchange=async(e)=>{ try{ await api(`/members/${id}`,{method:'PATCH',body:{role:e.target.value}}); toast('Ролята е сменена'); }catch(err){ toast(err.message,true); viewTeam(main); } };
+    tr.querySelector('.rm').onclick=async()=>{ try{ await api(`/members/${id}`,{method:'DELETE'}); toast('Премахнат'); viewTeam(main); }catch(err){ toast(err.message,true); } }; });
+}
+
+/* ==================== ОДИТ ==================== */
+async function viewAudit(main){
+  const logs=await api('/audit');
+  main.innerHTML=pageH('Одитен журнал','Append-only запис на всички промени')+`
+    <div class="card">${logs.length?`<table><thead><tr><th>Кога</th><th>Метод</th><th>Път</th><th class="num">Статус</th></tr></thead><tbody>${logs.map(l=>`<tr><td class="muted">${esc(new Date(l.created_at).toLocaleString('bg-BG'))}</td><td><span class="pill s-blue na">${esc(l.method)}</span></td><td>${esc(l.path)}</td><td class="num">${l.status_code<400?`<span class="badge-ok">${l.status_code}</span>`:`<span class="badge-bad">${l.status_code}</span>`}</td></tr>`).join('')}</tbody></table>`:empty('Няма записи.')}</div>`;
+}
+
+/* ---------- start ---------- */
+if(token) boot(); else document.getElementById('auth').style.display='grid';
+window.addEventListener('hashchange',()=>{ const v=location.hash.replace('#',''); if(v&&v!==currentView&&companyId) navigate(v); });
+</script>
+</body>
+</html>

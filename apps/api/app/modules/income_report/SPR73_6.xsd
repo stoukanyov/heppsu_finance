@@ -1,0 +1,390 @@
+<?xml version="1.0" encoding="WINDOWS-1251"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified" attributeFormDefault="unqualified">
+	<xs:element name="dec736">
+		<xs:annotation>
+			<xs:documentation>Справка за изплатени през годината доходи по чл. 73, ал. 6 от ЗДДФЛ и за удържаните данък и задължителни осигурителни вноски</xs:documentation>
+		</xs:annotation>
+		<xs:complexType>
+			<xs:all>
+				<xs:element name="isterm" minOccurs="0">
+					<xs:annotation>
+						<xs:documentation>Отбележете, ако справката се подава при заличаване/прекратяване на предприятие в срока по чл. 162 от ЗКПО; 1 - при отбелязан чекбокс, иначе 0</xs:documentation>
+					</xs:annotation>
+					<xs:simpleType>
+						<xs:restriction base="xs:integer">
+							<xs:minInclusive value="0"/>
+							<xs:maxInclusive value="1"/>
+						</xs:restriction>
+					</xs:simpleType>
+				</xs:element>
+				<xs:element name="year" minOccurs="1">
+					<xs:annotation>
+						<xs:documentation>Година, за която се подава справката</xs:documentation>
+					</xs:annotation>
+					<xs:simpleType>
+						<xs:restriction base="xs:integer">
+							<xs:minInclusive value="2019"/>
+						</xs:restriction>
+					</xs:simpleType>
+				</xs:element>
+				<xs:element name="part1">
+					<xs:annotation>
+						<xs:documentation>Част І Идентификационни данни за платеца на дохода</xs:documentation>
+					</xs:annotation>
+					<xs:complexType>
+						<xs:all>
+							<xs:element name="eik">
+								<xs:annotation>
+									<xs:documentation>1. ЕИК/Служебен № от регистъра на НАП</xs:documentation>
+								</xs:annotation>
+								<xs:simpleType>
+									<xs:restriction base="xs:string">
+										<xs:minLength value="9"/>
+										<xs:maxLength value="10"/>
+									</xs:restriction>
+								</xs:simpleType>
+							</xs:element>
+							<xs:element name="name">
+								<xs:annotation>
+									<xs:documentation>2. Наименование</xs:documentation>
+								</xs:annotation>
+								<xs:simpleType>
+									<xs:restriction base="xs:string">
+										<xs:maxLength value="200"/>
+									</xs:restriction>
+								</xs:simpleType>
+							</xs:element>
+							<xs:element name="phone" minOccurs="0">
+								<xs:annotation>
+									<xs:documentation>3.1. Телефон</xs:documentation>
+								</xs:annotation>
+								<xs:simpleType>
+									<xs:restriction base="xs:string">
+										<xs:maxLength value="20"/>
+									</xs:restriction>
+								</xs:simpleType>
+							</xs:element>
+							<xs:element name="mail" minOccurs="0">
+								<xs:annotation>
+									<xs:documentation>3.2.e-mail</xs:documentation>
+								</xs:annotation>
+								<xs:simpleType>
+									<xs:restriction base="xs:string">
+										<xs:maxLength value="200"/>
+									</xs:restriction>
+								</xs:simpleType>
+							</xs:element>
+							<xs:element name="reprname" minOccurs="0">
+								<xs:annotation>
+									<xs:documentation>Данни за представляващия: 4.1. Собствено име, презиме и фамилно име на представляващия </xs:documentation>
+								</xs:annotation>
+								<xs:simpleType>
+									<xs:restriction base="xs:string">
+										<xs:maxLength value="600"/>
+									</xs:restriction>
+								</xs:simpleType>
+							</xs:element>
+							<xs:element name="reprident" minOccurs="0">
+								<xs:annotation>
+									<xs:documentation>Данни за представляващия: 4.2. ЕГН/ЛН/ЛНЧ/Служебен № от регистъра на НАП</xs:documentation>
+								</xs:annotation>
+								<xs:simpleType>
+									<xs:restriction base="xs:string">
+										<xs:length value="10"/>
+									</xs:restriction>
+								</xs:simpleType>
+							</xs:element>
+						</xs:all>
+					</xs:complexType>
+				</xs:element>
+				<xs:element name="part2">
+					<xs:annotation>
+						<xs:documentation>Част ІІ Данни за изплатените доходи </xs:documentation>
+					</xs:annotation>
+					<xs:complexType>
+						<xs:sequence>
+							<xs:element name="rowsenum" maxOccurs="unbounded">
+								<xs:complexType>
+									<xs:all>
+										<xs:element name="correctioncode">
+											<xs:annotation>
+												<xs:documentation>Код корекция; 0 за основни данни; 1 – за коригиращи данни и 8 – за заличаващи данни </xs:documentation>
+											</xs:annotation>
+											<xs:simpleType>
+												<xs:restriction base="xs:integer">
+													<xs:enumeration value="0"/>
+													<xs:enumeration value="1"/>
+													<xs:enumeration value="8"/>
+												</xs:restriction>
+											</xs:simpleType>
+										</xs:element>
+										<xs:element name="firstname" minOccurs="1">
+											<xs:annotation>
+												<xs:documentation>Собствено име</xs:documentation>
+											</xs:annotation>
+											<xs:simpleType>
+												<xs:restriction base="xs:string">
+													<xs:maxLength value="200"/>
+												</xs:restriction>
+											</xs:simpleType>
+										</xs:element>
+										<xs:element name="secondname" minOccurs="0">
+											<xs:annotation>
+												<xs:documentation>Презиме</xs:documentation>
+											</xs:annotation>
+											<xs:simpleType>
+												<xs:restriction base="xs:string">
+													<xs:maxLength value="200"/>
+												</xs:restriction>
+											</xs:simpleType>
+										</xs:element>
+										<xs:element name="thirdname" minOccurs="1">
+											<xs:annotation>
+												<xs:documentation>Фамилно име</xs:documentation>
+											</xs:annotation>
+											<xs:simpleType>
+												<xs:restriction base="xs:string">
+													<xs:maxLength value="200"/>
+												</xs:restriction>
+											</xs:simpleType>
+										</xs:element>
+										<xs:element name="identtype" minOccurs="1">
+											<xs:annotation>
+												<xs:documentation>Тип идентификатор: 0 за лице с ЕГН; 1 за лице с ЛН, ЛНЧ или Сл. № от регистъра на НАП;</xs:documentation>
+											</xs:annotation>
+											<xs:simpleType>
+												<xs:restriction base="xs:integer">
+													<xs:minInclusive value="0"/>
+													<xs:maxInclusive value="1"/>
+												</xs:restriction>
+											</xs:simpleType>
+										</xs:element>
+										<xs:element name="ident" minOccurs="1">
+											<xs:annotation>
+												<xs:documentation>ЕГН/ЛН/ЛНЧ/Сл. № от регистъра на НАП</xs:documentation>
+											</xs:annotation>
+											<xs:simpleType>
+												<xs:restriction base="xs:string">
+													<xs:maxLength value="10"/>
+													<xs:minLength value="9"/>
+												</xs:restriction>
+											</xs:simpleType>
+										</xs:element>
+										<xs:element name="ismainemployer" minOccurs="1">
+											<xs:annotation>
+												<xs:documentation>Работодател по основно трудово правоотношение към 31 декември на данъчната година; 1 - избран чекбокс, иначе 0</xs:documentation>
+											</xs:annotation>
+											<xs:simpleType>
+												<xs:restriction base="xs:integer">
+													<xs:minInclusive value="0"/>
+													<xs:maxInclusive value="1"/>
+												</xs:restriction>
+											</xs:simpleType>
+										</xs:element>
+										<xs:element name="incomedata" minOccurs="1">
+											<xs:complexType>
+												<xs:all>
+													<xs:element name="incomerows" minOccurs="1">
+														<xs:complexType>
+															<xs:sequence>
+																<xs:element name="rowsenum" minOccurs="1" maxOccurs="unbounded">
+																	<xs:complexType>
+																		<xs:all>
+																			<xs:element name="incomecode" minOccurs="1">
+																				<xs:annotation>
+																					<xs:documentation>Код на дохода</xs:documentation>
+																				</xs:annotation>
+																				<xs:simpleType>
+																					<xs:restriction base="xs:string">
+																						<xs:length value="3"/>
+																					</xs:restriction>
+																				</xs:simpleType>
+																			</xs:element>
+																			<xs:element name="employereik" minOccurs="1">
+																				<xs:annotation>
+																					<xs:documentation>Данни за работодателя  изплатил дохода: ЕИК/Сл. № от регистъра на НАП</xs:documentation>
+																				</xs:annotation>
+																				<xs:simpleType>
+																					<xs:restriction base="xs:string">
+																						<xs:minLength value="9"/>
+																						<xs:maxLength value="10"/>
+																					</xs:restriction>
+																				</xs:simpleType>
+																			</xs:element>
+																			<xs:element name="employername" minOccurs="1">
+																				<xs:annotation>
+																					<xs:documentation>Данни за работодателя  изплатил дохода: ИМЕ/НАИМЕНОВАНИЕ</xs:documentation>
+																				</xs:annotation>
+																				<xs:simpleType>
+																					<xs:restriction base="xs:string">
+																						<xs:maxLength value="200"/>
+																					</xs:restriction>
+																				</xs:simpleType>
+																			</xs:element>
+																			<xs:element name="income" minOccurs="1">
+																				<xs:annotation>
+																					<xs:documentation>Облагаем доход</xs:documentation>
+																				</xs:annotation>
+																				<xs:simpleType>
+																					<xs:restriction base="xs:float"/>
+																				</xs:simpleType>
+																			</xs:element>
+																			<xs:element name="healthinsbg" type="xs:float" minOccurs="0">
+																				<xs:annotation>
+																					<xs:documentation>Задължителни осигурителни вноски за сметка на физическото лице: Удържани по реда на КСО и ЗЗО/ Авансово внесени чрез дружеството на СОЛ
+</xs:documentation>
+																				</xs:annotation>
+																			</xs:element>
+																			<xs:element name="healthinsforeign" type="xs:float" minOccurs="0">
+																				<xs:annotation>
+																					<xs:documentation>Задължителни осигурителни вноски за сметка на физическото лице: Внесени в чужбина
+</xs:documentation>
+																				</xs:annotation>
+																			</xs:element>
+																			<xs:element name="advancetax" type="xs:float" minOccurs="1">
+																				<xs:annotation>
+																					<xs:documentation>Авансов данък по чл. 42 от ЗДДФЛ</xs:documentation>
+																				</xs:annotation>
+																			</xs:element>
+																			<xs:element name="taxreductiondisabled" type="xs:float" minOccurs="0">
+																				<xs:annotation>
+																					<xs:documentation>Данъчно облекчение за лица с намалена работоспособност по чл. 18, ал. 1 или ал. 2 от ЗДДФЛ          </xs:documentation>
+																				</xs:annotation>
+																			</xs:element>
+																			<xs:element name="taxreductionins" type="xs:float" minOccurs="0">
+																				<xs:annotation>
+																					<xs:documentation>Данъчно облекчение за лични вноски за доброволно осигуряване по чл. 19, ал. 1 или ал. 2 от ЗДДФЛ      </xs:documentation>
+																				</xs:annotation>
+																			</xs:element>
+																			<xs:element name="taxreductionhealthins" type="xs:float" minOccurs="0">
+																				<xs:annotation>
+																					<xs:documentation>Данъчно облекчение за лични вноски за доброволно здравно осигуряване и за застраховки „Живот” по чл. 19, ал. 1 или ал. 2 от ЗДДФЛ    </xs:documentation>
+																				</xs:annotation>
+																			</xs:element>
+																			<xs:element name="eiktransfrom" minOccurs="0">
+																				<xs:annotation>
+																					<xs:documentation>ЕИК на преобразуващото се предприятие</xs:documentation>
+																				</xs:annotation>
+																				<xs:simpleType>
+																					<xs:restriction base="xs:string">
+																						<xs:minLength value="9"/>
+																						<xs:maxLength value="10"/>
+																					</xs:restriction>
+																				</xs:simpleType>
+																			</xs:element>
+																		</xs:all>
+																	</xs:complexType>
+																</xs:element>
+															</xs:sequence>
+														</xs:complexType>
+													</xs:element>
+													<xs:element name="taxbase251" type="xs:float" minOccurs="0">
+														<xs:annotation>
+															<xs:documentation>Годишна данъчна основа по чл. 25, ал. 1 от ЗДДФЛ (сборът от сумите в колона 3 – сборът от сумите в колона 4 и/или колона 5 за доходите с код 101) Попълва се само от работодател по основно трудово правоотношение    </xs:documentation>
+														</xs:annotation>
+													</xs:element>
+													<xs:element name="taxbase253" type="xs:float" minOccurs="0">
+														<xs:annotation>
+															<xs:documentation>Годишна данъчна основа по чл. 25, ал. 3 от ЗДДФЛ (сборът от сумите в колона 3 – сборът от сумите в колона 4 и/или колона 5 х 10% за доходите с код 103) Попълва се само от работодател по основно трудово правоотношение</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+													<xs:element name="taxbase49" minOccurs="0">
+														<xs:complexType>
+															<xs:all>
+																<xs:element name="taxbase" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Годишна данъчна основа, (р. 8.1. + р. 8.2)  </xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="taxreductiondisabled" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Данъчно облекчение за лица с намалена работоспособност по чл. 18, ал. 1 или ал. 2 от ЗДДФЛ          </xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="taxreductionins" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Данъчно облекчение за лични вноски за доброволно осигуряване по чл. 19, ал. 1 или ал. 2 от ЗДДФЛ      </xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="taxreductionhealthins" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Данъчно облекчение за лични вноски за доброволно здравно осигуряване и за застраховки „Живот” по чл. 19, ал. 1 или ал. 2 от ЗДДФЛ    </xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="taxreductionretire" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Данъчно облекчение за лични вноски за осигурителен стаж при пенсиониране по чл. 20 от ЗДДФЛ</xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="taxreductiondonation01" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Данъчно облекчение за дарения по чл. 22 от ЗДДФЛ,  в т.ч. за:  дарения в полза на лица с код 01</xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="taxreductiondonation02" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Данъчно облекчение за дарения по чл. 22 от ЗДДФЛ,  в т.ч. за:  дарения в полза на лица с код 02</xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="taxreductiondonation03" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Данъчно облекчение за дарения по чл. 22 от ЗДДФЛ,  в т.ч. за:  дарения в полза на лица с код 03</xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="taxreductionchildren" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Данъчно облекчение за деца по чл. 22в от ЗДДФЛ</xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="taxreductionchildrendisab" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Данъчно облекчение за деца с увреждания по чл. 22г от ЗДДФЛ</xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="taxbase491" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Годишна данъчна основа по чл. 49, ал. 1 от ЗДДФЛ след намаленията 
+(к.6 – к.8 ? 16)</xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="tax" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Дължим годишен данък, определен по реда на чл. 49 от ЗДДФЛ</xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="diff18" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Разлика между колона 18 и сбора от сумите в колона 7 за доходите с код 101 и 103</xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="sum19deducted" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Сума по колона 19, удържана от лицето до 31 януари на следващата година</xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+																<xs:element name="sum19refund" type="xs:float" minOccurs="0">
+																	<xs:annotation>
+																		<xs:documentation>Сума по колона 19, възстановена на лицето до 31 януари на следващата година  </xs:documentation>
+																	</xs:annotation>
+																</xs:element>
+															</xs:all>
+														</xs:complexType>
+													</xs:element>
+													<xs:element name="sumtaxdeducted" type="xs:float">
+														<xs:annotation>
+															<xs:documentation>Общ размер на удържания данък за доходите от трудови правоотношения</xs:documentation>
+														</xs:annotation>
+													</xs:element>
+												</xs:all>
+											</xs:complexType>
+										</xs:element>
+									</xs:all>
+								</xs:complexType>
+							</xs:element>
+						</xs:sequence>
+					</xs:complexType>
+				</xs:element>
+			</xs:all>
+		</xs:complexType>
+	</xs:element>
+</xs:schema>
