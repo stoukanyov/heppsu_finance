@@ -63,7 +63,9 @@ class GoCardlessBankConnector(BankConnector):
         if auth:
             req.add_header("Authorization", f"Bearer {self._access_token()}")
         try:
-            with urllib.request.urlopen(req, timeout=_TIMEOUT) as response:
+            # URL-ът е `_BASE + path`, а `_BASE` е константа в модула — схемата е
+            # фиксирана и потребителски вход не участва в адреса.
+            with urllib.request.urlopen(req, timeout=_TIMEOUT) as response:  # nosec B310  # noqa: S310
                 return json.loads(response.read() or "{}")
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:300]

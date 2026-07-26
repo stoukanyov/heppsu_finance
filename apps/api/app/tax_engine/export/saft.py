@@ -16,6 +16,10 @@ import datetime as dt
 import xml.etree.ElementTree as ET
 from decimal import Decimal
 
+# Входящите документи идват отвън (фактура от доставчик, получен SAF-T), затова
+# се парсват с `defusedxml`: стандартният ElementTree е уязвим на entity expansion
+# („billion laughs") и един малък файл може да изяде паметта на процеса.
+from defusedxml.ElementTree import fromstring as safe_fromstring
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -299,9 +303,12 @@ class SaftBgV1Provider(ExportProvider):
         report.extend(self.schema.validate(xml))
 
         try:
-            root = ET.fromstring(xml)
+            root = safe_fromstring(xml)
         except ET.ParseError as exc:
             report.add(ERROR, f"Файлът не е валиден XML: {exc}")
+            return report
+        except Exception as exc:      # DTD/ENTITY — defusedxml отказва файла
+            report.add(ERROR, f"Файлът е отказан по съображения за сигурност: {exc}")
             return report
 
         ns = f"{{{self.namespace}}}"

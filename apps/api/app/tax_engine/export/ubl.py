@@ -17,6 +17,11 @@ import datetime as dt
 import xml.etree.ElementTree as ET
 from decimal import Decimal
 
+# Входящите документи идват отвън (фактура от доставчик, получен SAF-T), затова
+# се парсват с `defusedxml`: стандартният ElementTree е уязвим на entity expansion
+# („billion laughs") и един малък файл може да изяде паметта на процеса.
+from defusedxml.ElementTree import fromstring as safe_fromstring
+
 from app.tax_engine.export.base import ExportProvider, ExportResult
 from app.tax_engine.export.validation import ERROR, WARNING, ValidationReport
 
@@ -189,9 +194,12 @@ class UblBisBillingProvider(ExportProvider):
         """
         report = ValidationReport(target="Електронна фактура EN 16931 / PEPPOL BIS 3.0")
         try:
-            root = ET.fromstring(xml)
+            root = safe_fromstring(xml)
         except ET.ParseError as exc:
             report.add(ERROR, f"Файлът не е валиден XML: {exc}")
+            return report
+        except Exception as exc:      # DTD/ENTITY — defusedxml отказва файла
+            report.add(ERROR, f"Файлът е отказан по съображения за сигурност: {exc}")
             return report
 
         def cbc(node, tag: str) -> str:
@@ -290,7 +298,7 @@ def parse_ubl(xml: bytes) -> dict:
     Замества OCR: когато доставчикът прати структуриран документ, няма какво да се
     разпознава — данните вече са машинни.
     """
-    root = ET.fromstring(xml)
+    root = safe_fromstring(xml)
     is_credit = root.tag.endswith("CreditNote")
 
     def cbc(node, tag: str) -> str | None:
