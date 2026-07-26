@@ -76,6 +76,7 @@ production попада некомитнат или чужд код. За produc
 | Бекъп преди миграции | `deploy.sh` | всеки деплой |
 | Нощен бекъп с проверка за цялост | `backup.sh` | 03:00 |
 | Връщане на предишния образ | `deploy.sh` | при провален health check |
+| Схемата от миграциите има очакваните DEFAULT-и | `tests/test_migrations_schema.py` | CI |
 
 Разрушителна миграция минава само с изричен подпис във файла:
 
@@ -97,7 +98,9 @@ gunzip -c backups/pre-deploy-<стамп>.sql.gz | \
 
 ```bash
 ssh heppsu-deploy 'crontab -l'
-# 0 3 * * * /srv/aifos/prod/release/infra/backup.sh >> /srv/aifos/prod/backups/backup.log 2>&1
+# 0  3 * * *  backup.sh prod
+# 30 3 * * *  backup.sh preprod
+# 0  4 * * *  demo/recreate.sh      ← пресъздава демото от нулата
 ```
 
 14 дневни + 8 седмични копия, с проверка че дъмпът не е празен и архивът не е
@@ -138,4 +141,5 @@ docker compose -p aifos-prod -f release/infra/docker-compose.yml \
 - Архив извън сървъра.
 - Наблюдение и известяване при срив (сега няма нищо — падне ли API-то, ще се
   разбере при следващото влизане).
-- Демо среда с измислени данни и политика за ретеншън — виж `docs/BACKLOG.md`.
+- Политика за ретеншън на данните (GDPR × ЗСч) — виж `docs/BACKLOG.md`.
+- Защита пред pre-prod: средата е публично достъпна с отворена регистрация.
