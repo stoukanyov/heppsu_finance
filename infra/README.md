@@ -140,17 +140,19 @@ pre-prod и demo вървят непроменени.
 
 ### Ред на пускане
 
+Стъпки 2 и 3 са изпълнени на 28 юли 2026; остават 1, 4 и 5.
+
 1. **DNS**: `heppsu.com`, `www` и `app` → A запис `169.58.72.254`.
    MX и TXT записите на пощата не се пипат.
 2. **Сайтът на сървъра** (от репото `heppsu_website`): `./deploy.sh` там, или
    ```bash
    rsync -av --delete --exclude '.git' --exclude 'docs' \
-     ./ heppsu-deploy@169.58.72.254:/srv/aifos/prod/website/
+     ./ heppsu-deploy:/srv/aifos/prod/website/
    ```
 3. **Хостовете по HTTP** — още без сертификат, за да може certbot да мине:
    ```bash
    scp infra/nginx/sites-available/heppsu-http.conf \
-     heppsu-deploy@169.58.72.254:/srv/aifos/prod/nginx-extra/heppsu.conf
+     heppsu-deploy:/srv/aifos/prod/nginx-extra/heppsu.conf
    ssh heppsu-deploy 'cd /srv/aifos/prod && docker compose -p aifos-prod \
      -f release/infra/docker-compose.yml --project-directory . --env-file .env \
      up -d nginx && docker compose -p aifos-prod -f release/infra/docker-compose.yml \
@@ -171,7 +173,7 @@ pre-prod и demo вървят непроменени.
 5. **HTTPS**: същият файл се заменя с TLS вариантa и nginx се презарежда.
    ```bash
    scp infra/nginx/sites-available/heppsu-tls.conf \
-     heppsu-deploy@169.58.72.254:/srv/aifos/prod/nginx-extra/heppsu.conf
+     heppsu-deploy:/srv/aifos/prod/nginx-extra/heppsu.conf
    ssh heppsu-deploy 'cd /srv/aifos/prod && docker compose -p aifos-prod \
      -f release/infra/docker-compose.yml --project-directory . --env-file .env \
      exec nginx nginx -s reload'
