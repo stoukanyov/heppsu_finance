@@ -213,8 +213,10 @@
 
 ## Deploy · PDF · Кредитни известия · MT940/CAMT
 
-- **Deploy наръчник** (`docs/DEPLOY.md`): Ubuntu 24.04 + Docker Compose + Caddy (авто-HTTPS),
-  ufw, бекъпи (pg_dump), обновяване, security чеклист. Compose пуска `alembic upgrade head`.
+- **Deploy наръчник**: `docs/DEPLOY.md` е **остарял** (описва Caddy и `/opt/ai-finance-os` —
+  такива няма). Актуалното е `infra/README.md`: две машини, nginx + certbot в контейнери,
+  деплой само от git таг. Внимание: „бекъпи (pg_dump)“ по-долу описваше *съдържанието на
+  наръчника*, не работещ режим — ежедневният дъмп на production е спрял на 26.07.2026.
 - **PDF на фактури** (`GET /invoices/{id}/pdf`): fpdf2 + Unicode шрифт (авто-намиране DejaVu/Arial,
   `PDF_FONT_PATH` override; DejaVu в Docker образа). Кирилица, редове, ДДС, тотали.
 - **Кредитни/дебитни известия**: тип на фактурата + връзка към оригинала; кредитно известие

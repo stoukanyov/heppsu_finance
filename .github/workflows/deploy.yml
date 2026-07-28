@@ -127,8 +127,29 @@ jobs:
               IdentitiesOnly yes
           EOF
 
+      # Репетицията иска ДВЕ неща, които досега не получаваше:
+      #   1. образ, строен от ТОЗИ ref — подразбиращият се `aifos-api:aifos-preprod`
+      #      на Phobos е остатък отпреди разделянето на машините и носи стар код;
+      #   2. head-а на миграциите в ref-а, за да се докаже, че е пробван правилният
+      #      образ. Без него зелена репетиция не значи нищо.
       - name: Репетиция на миграциите върху копие на production базата
-        run: ssh phobos-deploy 'bash /srv/aifos/prod/release/infra/ci/rehearse-migrations.sh'
+        run: |
+          HEAD_REV=$(python3 infra/ci/alembic_head.py apps/api/alembic/versions)
+          echo "head на миграциите в ${{ github.ref_name }}: $HEAD_REV"
+
+          # Образът се строи на Phobos от същия архив, който ще влезе в production.
+          TARBALL=$(mktemp -t aifos-rehearse-XXXXXX.tar.gz)
+          git archive --format=tar.gz -o "$TARBALL" HEAD apps infra
+          scp -q "$TARBALL" phobos-deploy:/tmp/rehearse.tar.gz
+          ssh phobos-deploy "rm -rf /tmp/rehearse && mkdir -p /tmp/rehearse \
+            && tar -xzf /tmp/rehearse.tar.gz -C /tmp/rehearse \
+            && docker build -q -t aifos-api:rehearse /tmp/rehearse/apps/api"
+
+          ssh phobos-deploy "bash /tmp/rehearse/infra/ci/rehearse-migrations.sh \
+            aifos-api:rehearse '' $HEAD_REV"
+
+          ssh phobos-deploy "rm -rf /tmp/rehearse /tmp/rehearse.tar.gz \
+            && docker image rm -f aifos-api:rehearse >/dev/null 2>&1 || true"
 
       - name: Деплой към production
         run: ./infra/deploy.sh prod ${{ inputs.ref || github.ref_name }}
