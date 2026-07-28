@@ -1,21 +1,29 @@
 # Деплой по средите.
 #
 # Път на промяната:
-#   push към main  →  pre-prod  →  smoke тестове  →  (ръчно одобрение)  →  prod
+#   push към dev  →  pre-prod (Deimos)  →  smoke  →  merge в main  →  таг v*
+#   →  (ръчно одобрение)  →  production (Phobos)  →  demo от същия таг
 #
-# Production се пуска САМО от таг (v*), никога от клон. Така всяко production
-# издание има име, което може да се посочи, върне и сравни.
+# Две машини (виж infra/README.md):
+#   Phobos  169.58.72.254  само production
+#   Deimos  169.58.90.87   pre-prod, demo, Availo dev
 #
-# Нужни secrets в хранилището:
-#   DEPLOY_SSH_KEY   частният ключ на CI (публичният е в authorized_keys на deploy)
-#   DEPLOY_HOST      IP или домейн на сървъра
-#   DEPLOY_USER      deploy
-#   DEPLOY_KNOWN_HOSTS   изходът от `ssh-keyscan -t ed25519 <host>`
+# Production се пуска САМО от таг, никога от клон — средата `prod` в GitHub е
+# заключена за тагове `v*` и иска ръчно одобрение. Демото нарочно НЕ следва dev:
+# то се показва на клиенти и върви от същия таг като production.
+#
+# Нужни secrets:
+#   DEPLOY_SSH_KEY_PHOBOS   частен ключ на CI за Phobos
+#   DEPLOY_SSH_KEY_DEIMOS   частен ключ на CI за Deimos
+#   DEPLOY_HOST_PHOBOS      169.58.72.254
+#   DEPLOY_HOST_DEIMOS      169.58.90.87
+#   DEPLOY_USER             deploy
+#   DEPLOY_KNOWN_HOSTS      изходът от `ssh-keyscan -t ed25519 <двата адреса>`
 name: Деплой
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -24,9 +32,9 @@ on:
         required: true
         default: preprod
         type: choice
-        options: [preprod, prod]
+        options: [preprod, demo, prod]
       ref:
-        description: Git ref за деплой
+        description: Git ref (за demo и prod задължително таг)
         required: false
         default: ""
 
@@ -36,37 +44,40 @@ concurrency:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
-  # Портата: без зелени тестове нищо не тръгва към сървъра.
+  # Портата: без зелени тестове нищо не тръгва към сървър.
   # ─────────────────────────────────────────────────────────────────────────────
   gate:
     name: Проверки преди деплой
     uses: ./.github/workflows/integration.yml
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Pre-prod на Deimos — тук dev има право да е счупен.
+  # ─────────────────────────────────────────────────────────────────────────────
   preprod:
-    name: Pre-prod
+    name: Pre-prod (Deimos)
     needs: gate
-    if: github.ref == 'refs/heads/main' || inputs.environment == 'preprod'
+    if: github.ref == 'refs/heads/dev' || inputs.environment == 'preprod'
     runs-on: ubuntu-latest
     environment:
       name: preprod
-      url: http://${{ secrets.DEPLOY_HOST }}:8080/app/
+      url: http://${{ secrets.DEPLOY_HOST_DEIMOS }}:8080/app/
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ inputs.ref || github.ref }}
 
-      - name: SSH достъп
+      - name: SSH достъп до Deimos
         run: |
           install -d -m 700 ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY_DEIMOS }}" > ~/.ssh/id_deimos
+          chmod 600 ~/.ssh/id_deimos
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           cat > ~/.ssh/config <<EOF
-          Host heppsu-deploy
-              HostName ${{ secrets.DEPLOY_HOST }}
+          Host deimos-deploy
+              HostName ${{ secrets.DEPLOY_HOST_DEIMOS }}
               User ${{ secrets.DEPLOY_USER }}
-              IdentityFile ~/.ssh/id_deploy
+              IdentityFile ~/.ssh/id_deimos
               IdentitiesOnly yes
           EOF
 
@@ -75,51 +86,104 @@ jobs:
 
       - name: Smoke тестове
         run: |
-          ssh heppsu-deploy 'mkdir -p /tmp/ci'
-          scp infra/ci/smoke.py heppsu-deploy:/tmp/ci/smoke.py
-          ssh heppsu-deploy 'python3 /tmp/ci/smoke.py http://127.0.0.1:8080'
+          ssh deimos-deploy 'mkdir -p /tmp/ci'
+          scp infra/ci/smoke.py deimos-deploy:/tmp/ci/smoke.py
+          ssh deimos-deploy 'python3 /tmp/ci/smoke.py http://127.0.0.1:8080'
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Production: само от таг и само след ръчно одобрение (GitHub Environment с
-  # required reviewers). Репетицията на миграциите върху КОПИЕ на реалната база
-  # е последната преграда пред загуба на данни.
+  # Production на Phobos: само от таг и само след ръчно одобрение. Репетицията
+  # на миграциите върху КОПИЕ на реалната база е последната преграда пред
+  # загуба на данни.
   # ─────────────────────────────────────────────────────────────────────────────
   prod:
-    name: Production
+    name: Production (Phobos)
     needs: gate
     if: startsWith(github.ref, 'refs/tags/v') || inputs.environment == 'prod'
     runs-on: ubuntu-latest
     environment:
-      name: prod                    # изисква ръчно одобрение в настройките на хранилището
-      url: https://${{ secrets.DEPLOY_HOST }}/app/
+      name: prod                    # изисква ръчно одобрение
+      url: https://app.heppsu.com/app/
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ inputs.ref || github.ref }}
 
-      - name: SSH достъп
+      - name: SSH достъп до Phobos
         run: |
           install -d -m 700 ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          echo "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY_PHOBOS }}" > ~/.ssh/id_phobos
+          chmod 600 ~/.ssh/id_phobos
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           cat > ~/.ssh/config <<EOF
-          Host heppsu-deploy
-              HostName ${{ secrets.DEPLOY_HOST }}
+          Host phobos-deploy
+              HostName ${{ secrets.DEPLOY_HOST_PHOBOS }}
               User ${{ secrets.DEPLOY_USER }}
-              IdentityFile ~/.ssh/id_deploy
+              IdentityFile ~/.ssh/id_phobos
               IdentitiesOnly yes
           EOF
 
       - name: Репетиция на миграциите върху копие на production базата
-        run: ssh heppsu-deploy 'bash /srv/aifos/prod/release/infra/ci/rehearse-migrations.sh'
+        run: ssh phobos-deploy 'bash /srv/aifos/prod/release/infra/ci/rehearse-migrations.sh'
 
       - name: Деплой към production
         run: ./infra/deploy.sh prod ${{ inputs.ref || github.ref_name }}
 
-      - name: Smoke тестове
+      - name: Smoke тестове (само четящи)
         run: |
-          ssh heppsu-deploy 'mkdir -p /tmp/ci'
-          scp infra/ci/smoke.py heppsu-deploy:/tmp/ci/smoke.py
-          ssh heppsu-deploy 'python3 /tmp/ci/smoke.py http://127.0.0.1:80 --read-only'
+          ssh phobos-deploy 'mkdir -p /tmp/ci'
+          scp infra/ci/smoke.py phobos-deploy:/tmp/ci/smoke.py
+          ssh phobos-deploy 'python3 /tmp/ci/smoke.py http://127.0.0.1:80 --read-only'
+
+      - name: Домейнът отговаря
+        run: |
+          curl -fsS -o /dev/null -w 'heppsu.com → %{http_code}\n' https://heppsu.com/
+          curl -fsS -o /dev/null -w 'app.heppsu.com → %{http_code}\n' https://app.heppsu.com/api/v1/health
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Демо на Deimos — само ръчно и само от таг, после пълно пресъздаване:
+  # демото никога не носи вчерашни данни, нито днешния счупен комит.
+  # ─────────────────────────────────────────────────────────────────────────────
+  demo:
+    name: Demo (Deimos)
+    needs: gate
+    if: inputs.environment == 'demo'
+    runs-on: ubuntu-latest
+    environment:
+      name: preprod
+      url: http://${{ secrets.DEPLOY_HOST_DEIMOS }}:8081/app/
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Демото се пуска само от таг
+        run: |
+          REF="${{ inputs.ref || github.ref_name }}"
+          case "$REF" in
+            v*) echo "таг $REF — добре" ;;
+            *)  echo "Демото се деплойва само от таг v*, а не от '$REF'." >&2
+                echo "То се показва на клиенти и не бива да следва клон." >&2
+                exit 1 ;;
+          esac
+
+      - name: SSH достъп до Deimos
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY_DEIMOS }}" > ~/.ssh/id_deimos
+          chmod 600 ~/.ssh/id_deimos
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host deimos-deploy
+              HostName ${{ secrets.DEPLOY_HOST_DEIMOS }}
+              User ${{ secrets.DEPLOY_USER }}
+              IdentityFile ~/.ssh/id_deimos
+              IdentitiesOnly yes
+          EOF
+
+      - name: Деплой към demo
+        run: ./infra/deploy.sh demo ${{ inputs.ref || github.ref_name }}
+
+      - name: Пресъздаване с измислени данни
+        run: ssh deimos-deploy 'bash /srv/aifos/demo/release/infra/demo/recreate.sh'

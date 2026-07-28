@@ -13,6 +13,10 @@ on:
     branches: [main, dev]
   pull_request:
   workflow_dispatch:
+  # Портата на deploy.yml вика този поток с `uses:`. Без `workflow_call` викането
+  # се проваля преди да е пуснат и един тест — а съобщението говори за „липсващ
+  # файл“, което праща по грешна следа.
+  workflow_call:
 
 concurrency:
   group: integration-${{ github.ref }}
