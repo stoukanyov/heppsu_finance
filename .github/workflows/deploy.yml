@@ -56,11 +56,13 @@ jobs:
   preprod:
     name: Pre-prod (Deimos)
     needs: gate
-    if: github.ref == 'refs/heads/dev' || inputs.environment == 'preprod'
+    if: |
+      github.ref == 'refs/heads/dev'
+      || (github.event_name == 'workflow_dispatch' && inputs.environment == 'preprod')
     runs-on: ubuntu-latest
     environment:
       name: preprod
-      url: http://${{ secrets.DEPLOY_HOST_DEIMOS }}:8080/app/
+      url: http://169.58.90.87:8080/app/
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,7 +100,9 @@ jobs:
   prod:
     name: Production (Phobos)
     needs: gate
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.environment == 'prod'
+    if: |
+      startsWith(github.ref, 'refs/tags/v')
+      || (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod')
     runs-on: ubuntu-latest
     environment:
       name: prod                    # изисква ръчно одобрение
@@ -147,11 +151,11 @@ jobs:
   demo:
     name: Demo (Deimos)
     needs: gate
-    if: inputs.environment == 'demo'
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'demo'
     runs-on: ubuntu-latest
     environment:
       name: preprod
-      url: http://${{ secrets.DEPLOY_HOST_DEIMOS }}:8081/app/
+      url: http://169.58.90.87:8081/app/
     steps:
       - uses: actions/checkout@v4
         with:
