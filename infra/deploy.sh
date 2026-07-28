@@ -36,14 +36,49 @@ die()  { printf '\n\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 # всичко останало — на Deimos. Затова средата определя и сървъра: „деплой на
 # preprod“ не бива да зависи от това какво е било в AIFOS_HOST в тази обвивка.
 case "$ENV_NAME" in
-    prod)    SSH_HOST=phobos-deploy; HTTP_PORT=80;   HTTPS_PORT=443;  WORKERS=4; APP_ENV=production ;;
-    preprod) SSH_HOST=deimos-deploy; HTTP_PORT=8080; HTTPS_PORT=8443; WORKERS=2; APP_ENV=staging ;;
-    demo)    SSH_HOST=deimos-deploy; HTTP_PORT=8081; HTTPS_PORT=8444; WORKERS=1; APP_ENV=staging ;;
+    prod)    SSH_CANDIDATES="phobos-deploy heppsu-deploy deploy@169.58.72.254"
+             HTTP_PORT=80;   HTTPS_PORT=443;  WORKERS=4; APP_ENV=production ;;
+    preprod) SSH_CANDIDATES="deimos-deploy deploy@169.58.90.87"
+             HTTP_PORT=8080; HTTPS_PORT=8443; WORKERS=2; APP_ENV=staging ;;
+    demo)    SSH_CANDIDATES="deimos-deploy deploy@169.58.90.87"
+             HTTP_PORT=8081; HTTPS_PORT=8444; WORKERS=1; APP_ENV=staging ;;
     *) die "употреба: $0 {preprod|demo|prod} [git-ref]" ;;
 esac
 
-# Заобикалянето остава заради CI, където машините се адресират по IP.
-HOST="${AIFOS_HOST:-$SSH_HOST}"
+# Как се намира машината, в този ред:
+#   1. AIFOS_HOST, ако е зададен изрично;
+#   2. псевдонимът от ~/.ssh/config — така работи CI, който си пише свой конфиг;
+#   3. направо deploy@IP — така работи от машина, на която псевдоними няма.
+#
+# Стъпка 3 съществува, защото скриптът веднъж вече беше счупен точно тук:
+# подразбирането сочеше псевдоним, който го има само в CI, и деплой отникъде
+# другаде не тръгваше. Скрипт, който зависи от неописан локален конфиг, е
+# скрит капан — по-добре да опита и да каже какво е намерил.
+reachable() { ssh -o BatchMode=yes -o ConnectTimeout=8 "$1" true >/dev/null 2>&1; }
+
+HOST=""
+if [ -n "${AIFOS_HOST:-}" ]; then
+    HOST="$AIFOS_HOST"
+else
+    for CANDIDATE in $SSH_CANDIDATES; do
+        if reachable "$CANDIDATE"; then HOST="$CANDIDATE"; break; fi
+    done
+fi
+
+if [ -z "$HOST" ]; then
+    FIRST=${SSH_CANDIDATES%% *}
+    LAST=${SSH_CANDIDATES##* }
+    die "не мога да стигна до машината за ${ENV_NAME}. Пробвах: ${SSH_CANDIDATES}
+   Добави в ~/.ssh/config:
+
+     Host ${FIRST}
+         HostName ${LAST#*@}
+         User deploy
+         IdentityFile ~/.ssh/<ключът за тази машина>
+         IdentitiesOnly yes
+
+   или задай AIFOS_HOST=<ssh цел> за еднократно пускане."
+fi
 
 REMOTE_DIR="/srv/aifos/${ENV_NAME}"
 PROJECT="aifos-${ENV_NAME}"
