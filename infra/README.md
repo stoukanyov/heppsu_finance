@@ -200,12 +200,16 @@ pre-prod и demo вървят непроменени.
    ssh heppsu-deploy
    cd /srv/aifos/prod
    docker compose -p aifos-prod -f release/infra/docker-compose.yml \
-     --project-directory . --env-file .env run --rm certbot \
+     --project-directory . --env-file .env run --rm --entrypoint certbot certbot \
      certonly --webroot -w /var/www/certbot \
      -d heppsu.com -d www.heppsu.com -d app.heppsu.com \
      --agree-tos -m info@heppsu.com --no-eff-email
    ```
    Пробвай първо със `--dry-run`: Let's Encrypt ограничава до 5 неуспешни опита на час.
+
+   **`--entrypoint certbot` е задължителен.** Без него `run` наследява entrypoint-а
+   от compose файла (цикъла за подновяване), подадената команда се игнорира и
+   контейнерът просто заспива — изглежда като „виси мрежата“, а не е.
 5. **HTTPS**: същият файл се заменя с TLS вариантa и nginx се презарежда.
    ```bash
    scp infra/nginx/sites-available/heppsu-tls.conf \
