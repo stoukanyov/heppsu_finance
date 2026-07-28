@@ -111,20 +111,66 @@ ssh heppsu-deploy 'crontab -l'
 
 ## HTTPS
 
-Сега работи само на HTTP по IP. За сертификат трябва домейн, насочен към
-`169.58.72.254`. След това:
+Домейнът е `heppsu.com`. Разпределението е:
 
-```bash
-ssh heppsu-deploy
-cd /srv/aifos/prod
-docker compose -p aifos-prod -f release/infra/docker-compose.yml \
-  --project-directory . --env-file .env run --rm certbot \
-  certonly --webroot -w /var/www/certbot -d ДОМЕЙН --agree-tos -m ПОЩА --no-eff-email
-```
+| Име | Какво обслужва |
+|---|---|
+| `heppsu.com`, `www.heppsu.com` | презентационният сайт (статични файлове) |
+| `app.heppsu.com` | AI Finance OS |
+| по IP | AI Finance OS — `default_server`, за да не се чупят pre-prod, demo и мобилното приложение |
 
-После в `release/infra/nginx/conf.d/aifos.conf` се разкоментира HTTPS блокът и
-пренасочването, домейнът се попълва и nginx се презарежда. Подновяването е
-автоматично (certbot контейнерът проверява на 12 часа).
+`conf.d/aifos.conf` е общ за всички среди и нарочно **не знае за домейна**.
+Именуваните хостове и TLS се пускат само на production, като файл в
+`/srv/aifos/prod/nginx-extra/`, който `aifos.conf` включва с
+`include /etc/nginx/extra/*.conf;`. Празна директория не е грешка — затова
+pre-prod и demo вървят непроменени.
+
+### Ред на пускане
+
+1. **DNS**: `heppsu.com`, `www` и `app` → A запис `169.58.72.254`.
+   MX и TXT записите на пощата не се пипат.
+2. **Сайтът на сървъра** (от репото `heppsu_website`): `./deploy.sh` там, или
+   ```bash
+   rsync -av --delete --exclude '.git' --exclude 'docs' \
+     ./ heppsu-deploy@169.58.72.254:/srv/aifos/prod/website/
+   ```
+3. **Хостовете по HTTP** — още без сертификат, за да може certbot да мине:
+   ```bash
+   scp infra/nginx/sites-available/heppsu-http.conf \
+     heppsu-deploy@169.58.72.254:/srv/aifos/prod/nginx-extra/heppsu.conf
+   ssh heppsu-deploy 'cd /srv/aifos/prod && docker compose -p aifos-prod \
+     -f release/infra/docker-compose.yml --project-directory . --env-file .env \
+     up -d nginx && docker compose -p aifos-prod -f release/infra/docker-compose.yml \
+     --project-directory . --env-file .env exec nginx nginx -t'
+   ```
+   Провери: `curl -I http://heppsu.com` → 200, `curl -I http://app.heppsu.com/api/v1/health` → 200.
+4. **Сертификат** за трите имена наведнъж (един сертификат, `heppsu.com` е основното):
+   ```bash
+   ssh heppsu-deploy
+   cd /srv/aifos/prod
+   docker compose -p aifos-prod -f release/infra/docker-compose.yml \
+     --project-directory . --env-file .env run --rm certbot \
+     certonly --webroot -w /var/www/certbot \
+     -d heppsu.com -d www.heppsu.com -d app.heppsu.com \
+     --agree-tos -m info@heppsu.com --no-eff-email
+   ```
+   Пробвай първо със `--dry-run`: Let's Encrypt ограничава до 5 неуспешни опита на час.
+5. **HTTPS**: същият файл се заменя с TLS вариантa и nginx се презарежда.
+   ```bash
+   scp infra/nginx/sites-available/heppsu-tls.conf \
+     heppsu-deploy@169.58.72.254:/srv/aifos/prod/nginx-extra/heppsu.conf
+   ssh heppsu-deploy 'cd /srv/aifos/prod && docker compose -p aifos-prod \
+     -f release/infra/docker-compose.yml --project-directory . --env-file .env \
+     exec nginx nginx -s reload'
+   ```
+   Ако сертификатът липсва, nginx **не тръгва** — файлът сочи към несъществуващи
+   пътища. Затова стъпка 5 идва след стъпка 4, не преди нея.
+
+Подновяването е автоматично (certbot контейнерът проверява на 12 часа).
+
+След като HTTPS работи, в мобилното приложение се сменя адресът от IP на
+`https://app.heppsu.com`, връща се ATS ограничението в `Info.plist` и се
+попълват `CERT_PINS`.
 
 ## CI/CD
 

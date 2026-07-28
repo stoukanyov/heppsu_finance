@@ -106,6 +106,13 @@ services:
       - "${AIFOS_HTTPS_PORT:-443}:443"
     volumes:
       - ./release/infra/nginx/conf.d:/etc/nginx/conf.d:ro
+      # Конфигурация, специфична за средата (именувани хостове, TLS). Директорията
+      # е на хоста, извън release/, за да не се трие при деплой и за да остане
+      # празна на pre-prod и demo, където домейн и сертификат няма.
+      - ./nginx-extra:/etc/nginx/extra:ro
+      # Презентационният сайт heppsu.com — статични файлове, качват се с rsync
+      # от репото heppsu_website. Няма ги на pre-prod и demo.
+      - ./website:/var/www/heppsu:ro
       - certbot-webroot:/var/www/certbot
       - certbot-conf:/etc/letsencrypt:ro
     depends_on:
