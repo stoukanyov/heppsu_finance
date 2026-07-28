@@ -21,30 +21,36 @@ set -euo pipefail
 
 ENV_NAME="${1:-}"
 GIT_REF="${2:-HEAD}"
-HOST="${AIFOS_HOST:-heppsu-deploy}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 log()  { printf '\n\033[1;36m▸ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m  ✓ %s\033[0m\n' "$*"; }
 die()  { printf '\n\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
-# Портове и брой работници по среда. `APP_ENV` е стойността на ENVIRONMENT в
-# приложението — тя трябва да е в PRODUCTION_ENVIRONMENTS (config.py), иначе
-# отпада fail-fast проверката на SECRET_KEY. Затова демото също се пише
-# „staging“, макар средата да се казва demo.
+# Машина, портове и брой работници по среда. `APP_ENV` е стойността на
+# ENVIRONMENT в приложението — тя трябва да е в PRODUCTION_ENVIRONMENTS
+# (config.py), иначе отпада fail-fast проверката на SECRET_KEY. Затова демото
+# също се пише „staging“, макар средата да се казва demo.
+#
+# Машините са две (виж infra/README.md): production живее сам на Phobos,
+# всичко останало — на Deimos. Затова средата определя и сървъра: „деплой на
+# preprod“ не бива да зависи от това какво е било в AIFOS_HOST в тази обвивка.
 case "$ENV_NAME" in
-    prod)    HTTP_PORT=80;   HTTPS_PORT=443;  WORKERS=4; APP_ENV=production ;;
-    preprod) HTTP_PORT=8080; HTTPS_PORT=8443; WORKERS=2; APP_ENV=staging ;;
-    demo)    HTTP_PORT=8081; HTTPS_PORT=8444; WORKERS=1; APP_ENV=staging ;;
+    prod)    SSH_HOST=phobos-deploy; HTTP_PORT=80;   HTTPS_PORT=443;  WORKERS=4; APP_ENV=production ;;
+    preprod) SSH_HOST=deimos-deploy; HTTP_PORT=8080; HTTPS_PORT=8443; WORKERS=2; APP_ENV=staging ;;
+    demo)    SSH_HOST=deimos-deploy; HTTP_PORT=8081; HTTPS_PORT=8444; WORKERS=1; APP_ENV=staging ;;
     *) die "употреба: $0 {preprod|demo|prod} [git-ref]" ;;
 esac
+
+# Заобикалянето остава заради CI, където машините се адресират по IP.
+HOST="${AIFOS_HOST:-$SSH_HOST}"
 
 REMOTE_DIR="/srv/aifos/${ENV_NAME}"
 PROJECT="aifos-${ENV_NAME}"
 cd "$REPO_ROOT"
 
 # ───────────────────────── 0. Проверки преди да пипнем сървъра ────────────────
-log "Проверки преди деплой (${ENV_NAME} ← ${GIT_REF})"
+log "Проверки преди деплой (${ENV_NAME} на ${HOST} ← ${GIT_REF})"
 
 git rev-parse --verify "${GIT_REF}^{commit}" >/dev/null 2>&1 \
     || die "няма такъв git ref: ${GIT_REF}"
