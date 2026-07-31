@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from app.api.deps import CurrentUser, DbSession
 from app.core.config import settings
-from app.core.rate_limit import RateLimitRule, make_rate_limit_dependency
+from app.core.rate_limit import RateLimitRule, ThrottlePolicy, make_throttle_dependency
 from app.modules.identity import service
 from app.modules.identity.schemas import (
     LoginRequest,
@@ -16,12 +16,24 @@ from app.modules.identity.schemas import (
 
 router = APIRouter(tags=["identity"])
 
-# Brute force защита за вход: праг по IP + имейл, конфигурируем през Settings.
-LoginRateLimit = make_rate_limit_dependency(
+# Brute force защита за вход. И трите прага са нужни: „IP+имейл" спира обикновеното
+# налучкване, „имейл" — същото, разпределено през много адреси, „IP" — spraying на
+# една парола срещу много акаунти. Виж `core.rate_limit` за компромисите.
+LoginRateLimit = make_throttle_dependency(
     "login",
-    lambda: RateLimitRule(
-        max_attempts=settings.LOGIN_RATE_LIMIT_ATTEMPTS,
-        window_seconds=settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+    lambda: ThrottlePolicy(
+        pair=RateLimitRule(
+            max_attempts=settings.LOGIN_RATE_LIMIT_ATTEMPTS,
+            window_seconds=settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+        ),
+        subject=RateLimitRule(
+            max_attempts=settings.LOGIN_RATE_LIMIT_ACCOUNT_ATTEMPTS,
+            window_seconds=settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+        ),
+        ip=RateLimitRule(
+            max_attempts=settings.LOGIN_RATE_LIMIT_IP_ATTEMPTS,
+            window_seconds=settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+        ),
     ),
 )
 

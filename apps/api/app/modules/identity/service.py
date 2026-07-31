@@ -28,6 +28,12 @@ _REUSE_DETECTED = (
 )
 
 
+# Хеш на случайна парола, срещу който се сверява при непознат имейл — само за да
+# отнеме толкова време, колкото и истинска проверка. Строи се веднъж при импорт и
+# затова носи същата цена (rounds), каквато има и всяка реална парола.
+_DUMMY_PASSWORD_HASH = hash_password(uuid.uuid4().hex)
+
+
 def get_user_by_email(db: Session, email: str) -> User | None:
     return db.scalar(select(User).where(User.email == email.lower()))
 
@@ -47,6 +53,11 @@ def create_user(db: Session, data: UserCreate) -> User:
 def authenticate(db: Session, email: str, password: str) -> User | None:
     user = get_user_by_email(db, email)
     if user is None or not user.is_active:
+        # Сверяваме срещу фиктивен хеш, вместо да се върнем веднага. Отговорът е
+        # един и същ текст и за непознат имейл, и за грешна парола, но без това
+        # *времето* го издава: bcrypt отнема ~100 ms, а ранното връщане — почти
+        # нула. Разликата е достатъчна, за да се изброят кои имейли съществуват.
+        verify_password(password, _DUMMY_PASSWORD_HASH)
         return None
     if not verify_password(password, user.hashed_password):
         return None

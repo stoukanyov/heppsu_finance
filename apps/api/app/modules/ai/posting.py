@@ -132,7 +132,10 @@ def _as_date(value) -> dt.date | None:
     text = value.strip()
     for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%Y/%m/%d"):
         try:
-            return dt.datetime.strptime(text, fmt).date()
+            # DTZ007: датата на документа е календарна — върху хартиената фактура
+            # няма час, камо ли часова зона. Резултатът се взима като `.date()`
+            # веднага, тъй че наивният datetime не преживява този ред.
+            return dt.datetime.strptime(text, fmt).date()  # noqa: DTZ007
         except ValueError:
             continue
     return None

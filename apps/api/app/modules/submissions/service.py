@@ -20,6 +20,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.clock import business_today
 from app.core.config import settings
 from app.modules.accounting.models import AccountingPeriod
 from app.modules.companies.models import Company
@@ -221,7 +222,7 @@ def mark_submitted(
     """Стъпка 6: потребителят е подал в портала с КЕП (извън системата)."""
     sub = get_submission(db, company_id, sub_id)
     _transition(sub, SubmissionStatus.SUBMITTED_EXTERNALLY)
-    sub.submitted_at = data.submitted_at or dt.date.today()
+    sub.submitted_at = data.submitted_at or business_today()
     if data.notes:
         sub.notes = data.notes
     db.commit()
@@ -244,7 +245,7 @@ def import_receipt(
     if sub.status in (SubmissionStatus.PREPARED, SubmissionStatus.DOWNLOADED):
         # Разписка има само след реално подаване — отбелязваме го автоматично.
         sub.status = SubmissionStatus.SUBMITTED_EXTERNALLY
-        sub.submitted_at = sub.submitted_at or dt.date.today()
+        sub.submitted_at = sub.submitted_at or business_today()
 
     doc = documents_service.create_document(
         db, company_id, user_id,
@@ -258,7 +259,7 @@ def import_receipt(
 
     sub.receipt_document_id = doc.id
     sub.receipt_number = data.receipt_number
-    sub.receipt_date = data.receipt_date or dt.date.today()
+    sub.receipt_date = data.receipt_date or business_today()
     sub.receipt_imported_at = dt.datetime.now(dt.UTC).replace(tzinfo=None)
     if data.notes:
         sub.notes = data.notes

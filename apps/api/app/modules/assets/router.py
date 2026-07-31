@@ -1,10 +1,10 @@
 """API рутер за дълготрайни активи и амортизации (tenant-scoped)."""
-import datetime as dt
 import uuid
 
 from fastapi import APIRouter, status
 
 from app.api.deps import CurrentCompany, DbSession, require
+from app.core.clock import business_today
 from app.modules.assets import service
 from app.modules.assets.schemas import (
     DepreciateRequest,
@@ -57,4 +57,4 @@ def depreciate(
 
 @router.post("/{asset_id}/dispose", response_model=FixedAssetOut, dependencies=[require("assets.manage")])
 def dispose(asset_id: uuid.UUID, ctx: CurrentCompany, db: DbSession) -> FixedAssetOut:
-    return FixedAssetOut.model_validate(service.dispose(db, ctx.company.id, asset_id, dt.date.today()))
+    return FixedAssetOut.model_validate(service.dispose(db, ctx.company.id, asset_id, business_today()))

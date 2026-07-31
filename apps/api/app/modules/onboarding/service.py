@@ -25,6 +25,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.clock import business_today
 from app.modules.accounting.models import (
     Account,
     AccountingPeriod,
@@ -477,7 +478,7 @@ def health_check(db: Session, company: Company) -> dict:
     open_periods = db.scalar(
         select(func.count()).select_from(AccountingPeriod).where(
             AccountingPeriod.company_id == company.id,
-            AccountingPeriod.end_date < dt.date.today(),
+            AccountingPeriod.end_date < business_today(),
             AccountingPeriod.status == "OPEN",
         )
     )

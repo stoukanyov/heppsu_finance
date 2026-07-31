@@ -24,6 +24,7 @@ import json
 import random
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 # ─────────────────────────── Контролна сума на ЕИК ────────────────────────────
@@ -65,16 +66,32 @@ def assert_clean(payload) -> None:
 
 
 # ────────────────────────────────── HTTP ──────────────────────────────────────
+# `urlopen` отваря и `file:`, и всяка друга схема, която Python познава. Адресът
+# идва от команден ред и този скрипт ПИШЕ данни — сгрешена схема не бива да води
+# до тихо четене от диска, а до спиране с ясно съобщение.
+_ALLOWED_SCHEMES = ("http", "https")
+
+
+def require_http_url(base: str) -> str:
+    parsed = urllib.parse.urlsplit(base)
+    if parsed.scheme not in _ALLOWED_SCHEMES or not parsed.netloc:
+        raise SystemExit(
+            f"невалиден адрес {base!r}: очаква се http:// или https:// с име на машина"
+        )
+    return base
+
+
 class Api:
     def __init__(self, base: str) -> None:
-        self.base = base.rstrip("/") + "/api/v1"
+        self.base = require_http_url(base).rstrip("/") + "/api/v1"
         self.token: str | None = None
         self.company: str | None = None
 
     def __call__(self, path, body=None, *, method=None, expect=(200, 201)):
         if body is not None:
             assert_clean(body)
-        req = urllib.request.Request(
+        # S310: схемата е проверена в `__init__` (`require_http_url`).
+        req = urllib.request.Request(  # noqa: S310
             self.base + path, method=method or ("POST" if body is not None else "GET")
         )
         req.add_header("Accept", "application/json")
@@ -86,7 +103,7 @@ class Api:
             req.add_header("X-Company-Id", self.company)
         data = json.dumps(body).encode() if body is not None else None
         try:
-            with urllib.request.urlopen(req, data, timeout=60) as r:
+            with urllib.request.urlopen(req, data, timeout=60) as r:  # nosec B310  # noqa: S310
                 status, raw = r.status, r.read()
         except urllib.error.HTTPError as e:
             status, raw = e.code, e.read()
@@ -243,7 +260,7 @@ def main(base: str) -> int:
             issued += 1
 
     purchased = 0
-    for i, (y, m) in enumerate(window[-4:]):
+    for y, m in window[-4:]:
         for j, (name, _) in enumerate(SUPPLIERS[:3]):
             api("/purchase-invoices", {
                 "counterparty_id": parties[name],

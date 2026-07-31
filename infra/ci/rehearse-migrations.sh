@@ -20,6 +20,10 @@ set -euo pipefail
 
 IMAGE="${1:-aifos-api:aifos-preprod}"
 DUMP="${2:-}"
+# Кой head трябва да е схемата СЛЕД репетицията. Изчислява се от кода, който се
+# пуска (`infra/ci/alembic_head.py`), не от образа — иначе стар образ потвърждава
+# сам себе си. Виж проверката в края.
+EXPECT_HEAD="${3:-${EXPECT_HEAD:-}}"
 PROD_DIR=/srv/aifos/prod
 PG_NAME="aifos-rehearsal-pg-$$"
 NET_NAME="aifos-rehearsal-net-$$"
@@ -47,6 +51,11 @@ if [ -n "$DUMP" ]; then
 elif [ -d "$PROD_DIR/release" ]; then
     cd "$PROD_DIR"
     set -a; . ./.env; set +a
+    # Без AIFOS_IMAGE compose отказва да прочете файла (`:?` в docker-compose.yml)
+    # и репетицията пада още преди да е взела дъмпа. Тук нищо не се вдига —
+    # само `exec` към работещата база. Същият капан изключи и дъмпа преди
+    # миграциите в deploy.sh; виж „Поправено“ в infra/README.md.
+    export AIFOS_IMAGE="${AIFOS_IMAGE:-aifos-api:aifos-prod}"
     docker compose -p aifos-prod -f release/infra/docker-compose.yml \
         --project-directory . --env-file .env \
         exec -T db pg_dump -U "${POSTGRES_USER:-aifos}" -d "${POSTGRES_DB:-aifos}" \
@@ -67,8 +76,13 @@ docker run -d --name "$PG_NAME" --network "$NET_NAME" \
     -e POSTGRES_INITDB_ARGS="--encoding=UTF8 --locale=C.UTF-8" \
     postgres:17-alpine >/dev/null
 
+# `-h 127.0.0.1` е задължително, а не украса. Образът на postgres вдига ВРЕМЕНЕН
+# сървър по време на initdb; той слуша само по unix сокета. `pg_isready` без хост
+# минава точно по него и отговаря „готово“ секунди преди истинския сървър да е
+# тръгнал — после временният се спира и възстановяването пада с „the database
+# system is shutting down“. По TCP временният сървър не се вижда изобщо.
 for i in $(seq 1 40); do
-    docker exec "$PG_NAME" pg_isready -U rehearsal -d aifos >/dev/null 2>&1 && break
+    docker exec "$PG_NAME" pg_isready -h 127.0.0.1 -U rehearsal -d aifos >/dev/null 2>&1 && break
     [ "$i" = 40 ] && die "копието на базата не тръгна"
     sleep 1
 done
@@ -101,6 +115,32 @@ ROWS_AFTER=$(count_rows)
 VER_AFTER=$(docker exec "$PG_NAME" psql -U rehearsal -d aifos -tAc \
     "select version_num from alembic_version;" | tr -d ' ')
 echo "  след миграциите:  ${ROWS_AFTER} реда, схема ${VER_AFTER}"
+
+# ─────────── Пробван ли е ПРАВИЛНИЯТ код, или само някакъв код? ───────────────
+#
+# Зелена репетиция срещу стар образ е по-опасна от никаква репетиция, защото дава
+# увереност за код, който не е бил пробван. А това не е хипотеза: след
+# разделянето на машините `aifos-api:aifos-preprod` на Phobos е остатък отпреди
+# преместването — pre-prod вече се строи на Deimos.
+#
+# Затова сравняваме с head-а на КОДА, който се пуска, а не с този на образа.
+# Първият вариант на проверката беше „схемата помръдна ли“ — той е грешен в двете
+# посоки: издание без нови миграции законно не мърда схемата и щеше да бъде
+# спряно фалшиво, а точно в този случай стар образ щеше да мине зелено.
+if [ -n "$EXPECT_HEAD" ]; then
+    if [ "$VER_AFTER" != "$EXPECT_HEAD" ]; then
+        die "схемата след репетицията е ${VER_AFTER}, а кодът очаква ${EXPECT_HEAD}.
+   Образът ${IMAGE} не носи този код — почти сигурно е стар.
+   Строй образа от ref-а, който пускаш, и подай него."
+    fi
+    ok "схемата съвпада с head-а на кода (${EXPECT_HEAD})"
+else
+    printf '\033[1;33m  ! без EXPECT_HEAD репетицията не доказва, че е пробван ПРАВИЛНИЯТ образ\033[0m\n'
+    printf '\033[1;33m    подай го: bash %s <образ> "" $(python3 infra/ci/alembic_head.py)\033[0m\n' "$0"
+    if [ "$VER_AFTER" = "$VER_BEFORE" ]; then
+        printf '\033[1;33m  ! схемата не помръдна (%s) — ако това издание носи миграции, образът е стар\033[0m\n' "$VER_BEFORE"
+    fi
+fi
 
 # ──────────────────────── 4. Изчезнали ли са данни? ───────────────────────────
 log "Проверявам за загуба на данни"

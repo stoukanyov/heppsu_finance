@@ -57,7 +57,10 @@ class GoCardlessBankConnector(BankConnector):
     def _call(self, path: str, *, method: str = "GET", body: dict | None = None,
               auth: bool = True) -> dict:
         data = json.dumps(body).encode() if body is not None else None
-        req = urllib.request.Request(_BASE + path, data=data, method=method)
+        # S310: `_BASE` е константа в модула („https://…“), а `path` се задава от
+        # методите тук — потребителски вход не участва в адреса и схемата не може
+        # да стане `file:`.
+        req = urllib.request.Request(_BASE + path, data=data, method=method)  # noqa: S310
         req.add_header("Content-Type", "application/json")
         req.add_header("Accept", "application/json")
         if auth:

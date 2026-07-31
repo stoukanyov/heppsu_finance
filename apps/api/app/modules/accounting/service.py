@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.clock import business_today
 from app.modules.accounting.models import (
     ZERO,
     Account,
@@ -288,7 +289,7 @@ def post_entry(
 
     entry.entry_number = _next_entry_number(db, company_id)
     entry.status = EntryStatus.POSTED
-    entry.posting_date = dt.date.today()
+    entry.posting_date = business_today()
     entry.posted_by_id = user_id
     db.commit()
     db.refresh(entry)
@@ -328,7 +329,7 @@ def reverse_entry(
         journal=original.journal,
         document_type="СТОРНО",
         document_number=original.document_number,
-        document_date=dt.date.today(),
+        document_date=business_today(),
         tax_event_date=original.tax_event_date,
         currency=original.currency,
         exchange_rate=original.exchange_rate,
@@ -337,7 +338,7 @@ def reverse_entry(
         reverses_entry_id=original.id,
         created_by_id=user_id,
         posted_by_id=user_id,
-        posting_date=dt.date.today(),
+        posting_date=business_today(),
         entry_number=_next_entry_number(db, company_id),
         lines=reversal_lines,
     )

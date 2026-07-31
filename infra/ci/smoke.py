@@ -21,15 +21,35 @@ import json
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 PASSED: list[str] = []
 FAILED: list[tuple[str, str]] = []
 
+# `urlopen` отваря и `file:`, и `ftp:`, и всяка друга схема, която Python познава.
+# Скриптът се вика от deploy потока с адрес, който идва отвън (аргумент, променлива
+# в CI, копи-пейст). Адрес без схема или с `file:` не дава грешка „няма връзка“, а
+# се ЧЕТЕ от диска — и smoke тестът минава срещу файл, докато разгърнатата среда е
+# счупена. Затова схемата се проверява веднъж, на входа.
+_ALLOWED_SCHEMES = ("http", "https")
+
+
+def require_http_url(base: str) -> str:
+    """Приема само http(s) адрес. Всичко друго спира скрипта с ясно съобщение."""
+    parsed = urllib.parse.urlsplit(base)
+    if parsed.scheme not in _ALLOWED_SCHEMES or not parsed.netloc:
+        raise SystemExit(
+            f"невалиден адрес {base!r}: очаква се http:// или https:// с име на машина"
+        )
+    return base
+
 
 def call(base: str, path: str, *, method: str = "GET", body=None,
          token: str | None = None, company: str | None = None, expect: int | None = None):
-    req = urllib.request.Request(base + path, method=method)
+    # S310: схемата на `base` е проверена на входа (`require_http_url`), а `path`
+    # се задава от проверките в този файл.
+    req = urllib.request.Request(base + path, method=method)  # noqa: S310
     req.add_header("Accept", "application/json")
     if token:
         req.add_header("Authorization", "Bearer " + token)
@@ -40,7 +60,7 @@ def call(base: str, path: str, *, method: str = "GET", body=None,
         req.add_header("Content-Type", "application/json")
         data = json.dumps(body).encode()
     try:
-        with urllib.request.urlopen(req, data, timeout=30) as r:
+        with urllib.request.urlopen(req, data, timeout=30) as r:  # nosec B310  # noqa: S310
             status, payload = r.status, r.read()
     except urllib.error.HTTPError as e:
         status, payload = e.code, e.read()
@@ -67,7 +87,7 @@ def check(name: str):
 
 
 def main(base: str, read_only: bool = False) -> int:
-    base = base.rstrip("/")
+    base = require_http_url(base).rstrip("/")
     api = base + "/api/v1"
     stamp = int(time.time())
     email = f"smoke-{stamp}@example.com"
@@ -90,8 +110,8 @@ def main(base: str, read_only: bool = False) -> int:
 
     @check("уеб приложението се сервира (/app/)")
     def _():
-        req = urllib.request.Request(base + "/app/")
-        with urllib.request.urlopen(req, timeout=30) as r:
+        req = urllib.request.Request(base + "/app/")  # noqa: S310 — виж `require_http_url`
+        with urllib.request.urlopen(req, timeout=30) as r:  # nosec B310  # noqa: S310
             html = r.read().decode("utf-8", "replace")
         assert r.status == 200, r.status
         assert "AI Finance OS" in html, "липсва заглавието"

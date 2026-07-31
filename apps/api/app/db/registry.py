@@ -22,6 +22,7 @@ from app.modules.payments import models as payments_models  # noqa: F401
 from app.modules.payroll import models as payroll_models  # noqa: F401
 from app.modules.purchases import models as purchases_models  # noqa: F401
 from app.modules.rbac import models as rbac_models  # noqa: F401
+from app.modules.security import models as security_models  # noqa: F401
 from app.modules.stores import models as stores_models  # noqa: F401
 from app.modules.submissions import models as submissions_models  # noqa: F401
 from app.modules.vat import models as vat_models  # noqa: F401

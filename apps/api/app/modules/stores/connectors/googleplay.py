@@ -88,7 +88,9 @@ class GooglePlayConnector(StoreConnector):
 def _parse_date(s: str) -> dt.date | None:
     for fmt in ("%Y-%m-%d", "%b %d, %Y", "%m/%d/%Y", "%d.%m.%Y"):
         try:
-            return dt.datetime.strptime(s.strip(), fmt).date()
+            # DTZ007: отчетът на Google Play съдържа календарни дати без час —
+            # резултатът е `.date()` и наивният datetime не излиза оттук.
+            return dt.datetime.strptime(s.strip(), fmt).date()  # noqa: DTZ007
         except ValueError:
             continue
     return None

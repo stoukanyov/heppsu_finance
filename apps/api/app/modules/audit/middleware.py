@@ -1,4 +1,5 @@
 """Middleware, което записва променящите действия в одитния журнал."""
+import logging
 import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -9,6 +10,8 @@ from app.core.security import decode_access_token
 from app.modules.audit.models import AuditLog
 
 _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
+
+_log = logging.getLogger(__name__)
 
 
 class AuditMiddleware(BaseHTTPMiddleware):
@@ -22,8 +25,19 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 and "/audit" not in path
             ):
                 _record(request, path, response.status_code)
-        except Exception:  # pragma: no cover — одитът никога не бива да чупи заявката
-            pass
+        except Exception:
+            # Одитът не бива да чупи заявката — затова изключението се поглъща.
+            # Но НЕ мълчаливо: `except: pass` тук значи, че журналът може да е с
+            # дупки, без никой да разбере. За система, чието обещание е
+            # проследимост на всяко действие, това е най-скъпият вид повреда:
+            # открива се чак когато някой поиска одитната следа за спорен период.
+            # `exception()` записва и traceback-а — иначе причината (пълна база,
+            # заключена таблица, изтекла връзка) остава невидима.
+            _log.exception(
+                "Одитният запис за %s %s не беше направен — журналът е с дупка",
+                request.method,
+                request.url.path,
+            )
         return response
 
 

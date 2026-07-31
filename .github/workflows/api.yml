@@ -34,7 +34,10 @@ jobs:
           pip install ruff==0.16.0
 
       - name: Линтер
-        run: ruff check .
+        # И скриптовете в `infra/` — те се пускат срещу production, тъй че грешка
+        # там струва колкото грешка в приложението. Правилата им са в `ruff.toml`
+        # в корена на хранилището.
+        run: ruff check . ../../infra
 
       # Тестовете сами си задават средата (виж tests/conftest.py): временна SQLite
       # база, AI_PROVIDER=stub, изключен rate limit. Затова тук няма env блок —

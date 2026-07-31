@@ -12,7 +12,6 @@ SAF-T е XML файл с одитна извадка от счетоводств
 """
 from __future__ import annotations
 
-import datetime as dt
 import xml.etree.ElementTree as ET
 from decimal import Decimal
 
@@ -23,6 +22,7 @@ from defusedxml.ElementTree import fromstring as safe_fromstring
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.clock import business_today
 from app.modules.accounting.models import (
     Account,
     AccountType,
@@ -84,7 +84,7 @@ class SaftBgV1Provider(ExportProvider):
         h = _sub(root, "Header")
         _sub(h, "AuditFileVersion", self.version)
         _sub(h, "AuditFileCountry", company.country or "BG")
-        _sub(h, "AuditFileDateCreated", dt.date.today().isoformat())
+        _sub(h, "AuditFileDateCreated", business_today().isoformat())
         _sub(h, "SoftwareCompanyName", "AI Finance OS")
         _sub(h, "SoftwareID", "AI-FINANCE-OS")
         _sub(h, "SoftwareVersion", ctx.get("software_version", "0.1.0"))

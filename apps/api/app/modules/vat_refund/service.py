@@ -19,6 +19,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.clock import business_today
 from app.core.config import settings
 from app.modules.accounting.models import AccountingPeriod
 from app.modules.companies.models import Company
@@ -413,7 +414,7 @@ def submit(
             "Възстановяване се заявява в клетка 80, 81 или 82 — процедурата още не е готова."
         )
     _transition(proc, RefundStatus.SUBMITTED_FOR_REFUND)
-    proc.submission_date = submitted_on or dt.date.today()
+    proc.submission_date = submitted_on or business_today()
     proc.expected_refund_deadline = proc.submission_date + dt.timedelta(
         days=settings.VAT_REFUND_DEADLINE_DAYS
     )

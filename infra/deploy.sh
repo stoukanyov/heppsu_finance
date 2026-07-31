@@ -14,7 +14,8 @@
 #   1. Отказва мръсна работна директория при деплой на production.
 #   2. Проверява разрушителни миграции (infra/ci/check_migrations.py).
 #   3. Прави дъмп на базата ПРЕДИ миграциите и спира, ако дъмпът се провали.
-#   4. Пуска миграциите на репетиция върху копие на реалната база (само за prod).
+#   4. (НЕ прави репетиция сам — тя е отделна стъпка в CI преди този скрипт:
+#       infra/ci/rehearse-migrations.sh. Пусни я на ръка, ако деплойваш без CI.)
 #   5. Health gate: при неуспех връща предишния образ обратно.
 #
 set -euo pipefail
@@ -129,6 +130,13 @@ cd "$REMOTE_DIR"
 rm -rf release.new && mkdir -p release.new
 tar -xzf release.tar.gz -C release.new
 
+# Изричното потвърждение струва един ред и спестява гадаене: когато на 28 юли
+# 2026 деплой от CI падна с „cannot stat release.new“, от лога не се виждаше дали
+# разархивирането изобщо е минало.
+[ -d release.new/apps ] && [ -d release.new/infra ] \
+    || { echo "ГРЕШКА: архивът не съдържа apps/ и infra/" >&2; ls -la release.new >&2; exit 1; }
+echo "  архивът е разархивиран ($(du -sh release.new | cut -f1))"
+
 if [ -f .env ]; then
     echo "  .env вече съществува — не го пипам"
 else
@@ -160,10 +168,32 @@ log "Дъмп на базата преди миграциите"
 ssh "$HOST" PROJECT="$PROJECT" REMOTE_DIR="$REMOTE_DIR" bash -euo pipefail <<'REMOTE'
 cd "$REMOTE_DIR"
 set -a; . ./.env; set +a
+
+# `docker-compose.yml` иска AIFOS_IMAGE без стойност по подразбиране (`:?`), за да
+# не тръгне стек с чужд образ. Тук нищо не се вдига — само се чете и се прави
+# pg_dump — но БЕЗ променливата дори `compose ps` гърми. И понеже грешката се
+# гълташе от `2>/dev/null`, проверката „върви ли базата“ връщаше „не“ и дъмпът се
+# пропускаше мълчаливо с „средата е нова“. Точно това се случваше от момента, в
+# който `:?` влезе в compose файла: между 26 и 28 юли 2026 нито един деплой не е
+# направил дъмп преди миграциите — предпазителят, заради който този скрипт
+# съществува, е бил изключен, без нищо да го покаже.
+export AIFOS_IMAGE="${AIFOS_IMAGE:-aifos-api:${PROJECT}}"
+
 dc() { docker compose -p "$PROJECT" -f release/infra/docker-compose.yml \
        --project-directory . --env-file .env "$@"; }
 
-if [ -d release ] && dc ps --status running --services 2>/dev/null | grep -qx db; then
+# Три различни състояния, а не две. „Няма какво да се дъмпва“ важи само за среда,
+# която още няма код. Ако кодът е там, а компоузът не отговаря, това е повреда и
+# деплоят спира — мълчаливото продължаване е начинът, по който се губят данни.
+if [ ! -d release ]; then
+    echo "  средата е нова — няма какво да се дъмпва"
+elif ! dc ps --format '{{.Service}}' >/dev/null 2>&1; then
+    echo "ГРЕШКА: не мога да прочета състоянието на стека — СПИРАМ преди миграциите." >&2
+    echo "       Провери на ${REMOTE_DIR}: docker compose -p ${PROJECT} ps" >&2
+    exit 1
+elif ! dc ps --status running --services | grep -qx db; then
+    echo "  базата не върви — няма какво да се дъмпва"
+else
     STAMP=$(date +%Y%m%d-%H%M%S)
     OUT="backups/pre-deploy-${STAMP}.sql.gz"
     dc exec -T db pg_dump -U "${POSTGRES_USER:-aifos}" -d "${POSTGRES_DB:-aifos}" \
@@ -178,8 +208,6 @@ if [ -d release ] && dc ps --status running --services 2>/dev/null | grep -qx db
     # Пазим последните 10 — иначе дъмповете растат без край. Съдържат лични данни,
     # затова колкото по-малко копия, толкова по-добре (виж docs/BACKLOG.md).
     ls -1t backups/pre-deploy-*.sql.gz 2>/dev/null | tail -n +11 | xargs -r rm -f
-else
-    echo "  средата е нова — няма какво да се дъмпва"
 fi
 REMOTE
 
@@ -195,6 +223,17 @@ dc() { docker compose -p "$PROJECT" -f release/infra/docker-compose.yml \
 if docker image inspect "aifos-api:${PROJECT}" >/dev/null 2>&1; then
     docker tag "aifos-api:${PROJECT}" "aifos-api:${PROJECT}-previous"
     echo "  предишният образ е запазен като aifos-api:${PROJECT}-previous"
+fi
+
+# Първо се уверяваме, че новото е налице, и чак тогава пипаме работещото.
+# Досега редът беше обратният: `release` отиваше в `release.old`, после `mv
+# release.new release` можеше да падне — и средата оставаше БЕЗ код. Точно това
+# счупи pre-prod на 28 юли 2026: деплоят падна върху `mv: cannot stat
+# 'release.new'`, а `release/` вече беше преместена и нищо не я върна.
+if [ ! -d release.new/apps ] || [ ! -d release.new/infra ]; then
+    echo "ГРЕШКА: release.new липсва или е непълна — не пипам работещата release/" >&2
+    ls -la >&2
+    exit 1
 fi
 
 rm -rf release.old
