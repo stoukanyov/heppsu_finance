@@ -14,6 +14,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.clock import business_today
 from app.modules.accounting.models import EntryStatus, JournalEntry
 from app.modules.banking.models import BankTransaction, BankTxStatus
 from app.modules.companies.models import Company, Membership
@@ -93,7 +94,7 @@ def client_overview(
     db: Session, user: User, *, reference_date: dt.date | None = None
 ) -> list[ClientOverviewOut]:
     """Състоянието на всеки клиент: какво чака работа и кой е следващият срок."""
-    today = reference_date or dt.date.today()
+    today = reference_date or business_today()
     companies = accessible_companies(db, user)
     ids = [c.id for c in companies]
 

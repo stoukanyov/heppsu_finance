@@ -18,6 +18,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.clock import business_today
 from app.modules.accounting.models import (
     Account,
     AccountType,
@@ -376,7 +377,7 @@ def kpi_series(
     `kpi_summary`), защото се ползва при всяко зареждане на таблото.
     """
     months = max(1, min(months, 36))
-    end = end or dt.date.today()
+    end = end or business_today()
     accounts = {
         a.id: a for a in db.scalars(select(Account).where(Account.company_id == company_id))
     }

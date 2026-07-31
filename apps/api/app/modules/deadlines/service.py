@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.clock import business_today
 from app.modules.companies.models import Company
 from app.modules.deadlines.holidays import next_working_day
 from app.modules.deadlines.models import DeadlineFiling
@@ -358,7 +359,7 @@ def upcoming_deadlines(
     ``include_filed=False`` ги изключва — така мобилният клиент насрочва
     напомняния само за това, което още предстои.
     """
-    today = reference_date or dt.date.today()
+    today = reference_date or business_today()
     days_ahead = max(1, min(days_ahead, MAX_DAYS_AHEAD))
     window_end = today + dt.timedelta(days=days_ahead)
 

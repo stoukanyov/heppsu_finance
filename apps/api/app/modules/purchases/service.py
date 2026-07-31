@@ -1,5 +1,4 @@
 """Бизнес логика за получени фактури (AP): чернова, осчетоводяване, ДДС."""
-import datetime as dt
 import uuid
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -7,6 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.clock import business_today
 from app.modules.accounting.models import Account, JournalType
 from app.modules.accounting.schemas import JournalEntryCreate, JournalLineIn
 from app.modules.accounting.service import create_entry, post_entry
@@ -261,7 +261,7 @@ def import_ubl(
         PurchaseCreate(
             counterparty_id=supplier.id,
             supplier_document_number=parsed["document_number"] or "БЕЗ НОМЕР",
-            document_date=parsed["issue_date"] or dt.date.today(),
+            document_date=parsed["issue_date"] or business_today(),
             due_date=parsed["due_date"],
             currency=parsed["currency"],
             vat_code_id=vat_code_id,

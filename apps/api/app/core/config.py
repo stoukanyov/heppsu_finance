@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     # Счетоводни настройки по подразбиране за нова компания
     DEFAULT_BASE_CURRENCY: str = "EUR"
     DEFAULT_COUNTRY: str = "BG"
+    # Зоната, в която фирмата брои дните. Сървърът работи в UTC — ако „днес“ се
+    # взима от него, всичко осчетоводено между полунощ и 03:00 софийско време
+    # получава вчерашна дата и попада в предходния данъчен период. Виж
+    # `app/core/clock.py`.
+    BUSINESS_TIMEZONE: str = "Europe/Sofia"
 
     # CORS (за web frontend по-късно)
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]

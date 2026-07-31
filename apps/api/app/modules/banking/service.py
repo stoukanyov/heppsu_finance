@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.clock import business_today
 from app.modules.accounting.models import Account, EntryStatus, JournalEntry
 from app.modules.banking.models import (
     ZERO,
@@ -155,7 +156,9 @@ def import_csv(
         if not raw_date or not raw_amount:
             continue
         try:
-            booking = dt.datetime.strptime(raw_date, date_format).date()
+            # DTZ007: банковото извлечение дава дата на осчетоводяване, не момент.
+            # Часова зона тук би била измислена — стойността се свежда до `.date()`.
+            booking = dt.datetime.strptime(raw_date, date_format).date()  # noqa: DTZ007
             amount = _parse_amount(raw_amount, decimal_comma)
         except (ValueError, ArithmeticError):
             raise _err(f"Невалидни данни на ред {i} (дата/сума)")
@@ -671,7 +674,7 @@ def sync_connection(
         raise _err("Няма свързани сметки — избери коя отдалечена сметка на коя местна отговаря")
 
     connector = _connector(connection.provider_code)
-    date_to = dt.date.today()
+    date_to = business_today()
     date_from = date_to - dt.timedelta(days=max(1, min(days_back, 730)))
 
     imported = duplicates = 0

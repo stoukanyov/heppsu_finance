@@ -2,12 +2,12 @@
 
 Модулът няма собствени таблици — работи върху съществуващите. Затова няма и `models.py`.
 """
-import datetime as dt
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.api.deps import CurrentCompany, DbSession, require
+from app.core.clock import business_today
 from app.modules.counterparties.models import CounterpartyType
 from app.modules.onboarding import service
 from app.modules.onboarding.schemas import (
@@ -60,7 +60,7 @@ def post_opening(data: OpeningBalancesIn, ctx: CurrentCompany, db: DbSession) ->
     """Осчетоводява началните салда в дневник „Начални салда“."""
     entry = service.post_opening_balances(
         db, ctx.company, ctx.membership.user_id,
-        data.on_date or dt.date.today(), [r.model_dump() for r in data.rows],
+        data.on_date or business_today(), [r.model_dump() for r in data.rows],
     )
     return PostedEntryOut(
         id=entry.id, entry_number=entry.entry_number, document_date=entry.document_date

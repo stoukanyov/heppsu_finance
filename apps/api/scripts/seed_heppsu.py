@@ -19,6 +19,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.clock import business_today
 from app.core.config import settings
 from app.core.database import engine
 from app.core.security import hash_password
@@ -97,7 +98,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Сийд на ХЕПСУ КОНСУЛТИНГ ЕООД")
     parser.add_argument("--email", default="ivaylo@heppsu.com")
     parser.add_argument("--password", default=None, help="само ако потребителят е нов")
-    parser.add_argument("--year", type=int, default=dt.date.today().year)
+    # Не `dt.date.today()`: в 00:30 софийско време на 1 януари сървърът (UTC) още е
+    # в старата година и фискалната година би се създала за грешния период.
+    parser.add_argument("--year", type=int, default=business_today().year)
     args = parser.parse_args()
 
     # В dev (SQLite) схемата се създава автоматично; в prod се разчита на Alembic.

@@ -1,11 +1,16 @@
 # Проверки, които доказват съвместимост с PRODUCTION.
 #
-# `api.yml` пуска бързите проверки (линтер, тестове на SQLite). Този поток пуска
-# бавните и по-важните: същите тестове срещу истински PostgreSQL, пазача на
-# миграциите и репетиция на миграциите върху копие на реалната схема.
+# ТОВА Е ПОРТАТА НА ДЕПЛОЯ: `deploy.yml` вика този файл с `uses:` и без зелен
+# резултат нищо не тръгва към сървър. Затова трите вида проверки, които Definition
+# of Done изисква, са ТУК, а не разпръснати по бързите потоци:
 #
-# Причина да са отделен файл: пада ли бързият поток, няма смисъл да се чака 10
-# минути за бавния — а и двата се разработват независимо.
+#   * модулните тестове — срещу истински PostgreSQL, не само срещу SQLite;
+#   * статичен анализ — ruff и bandit върху кода и върху скриптовете в `infra/`;
+#   * динамичен анализ — приложението се вдига срещу временна база и се пита живо.
+#
+# `api.yml` пуска бърза част от същото (линтер и тестове на SQLite) за незабавна
+# обратна връзка. Причина да са отделни файлове: пада ли бързият поток, няма
+# смисъл да се чака 10 минути за бавния — а и двата се разработват независимо.
 name: Интеграция
 
 on:
@@ -103,14 +108,16 @@ jobs:
             || python infra/ci/check_migrations.py
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # Сигурност: уязвими зависимости и опасни конструкции в кода.
+  # Статичен анализ: кодът се чете, без да се изпълнява. Уязвими зависимости,
+  # опасни конструкции, дати без часова зона.
+  #
+  # Задачата е ТУК, а не само в `api.yml`, защото този поток е портата на деплоя
+  # (`deploy.yml` го вика с `uses:`). Проверка, която не е в портата, не пази
+  # production — тя само оцветява значка.
   # ─────────────────────────────────────────────────────────────────────────────
   security:
-    name: Сигурност
+    name: Статичен анализ
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/api
     steps:
       - uses: actions/checkout@v4
 
@@ -119,12 +126,124 @@ jobs:
           python-version: "3.13"
 
       - name: Инсталиране
-        run: pip install bandit==1.9.4 pip-audit==2.10.1
+        run: pip install ruff==0.16.0 bandit==1.9.4 pip-audit==2.10.1
 
       - name: Уязвими зависимости
-        run: pip-audit -r requirements.txt --progress-spinner off
+        run: pip-audit -r apps/api/requirements.txt --progress-spinner off
+
+      # Правилата и всяко изключение с причина са в `apps/api/ruff.toml` (кодът на
+      # API-то) и в `ruff.toml` в корена (скриптовете в `infra/`, които пипат
+      # production). Ruff сам избира по-близкия конфигурационен файл.
+      - name: Линтер — грешки, не стил
+        run: ruff check apps/api infra
 
       - name: Опасни конструкции
         # Средно и високо ниво спират потока; ниските са шум (напр. dev ключът
         # по подразбиране, който така или иначе е забранен в production).
-        run: bandit -q -r app --severity-level medium
+        #
+        # Обхватът включва `infra` нарочно: скриптовете там се пускат СРЕЩУ
+        # production и грешка в тях струва колкото грешка в приложението.
+        run: bandit -q -r apps/api/app apps/api/scripts infra --severity-level medium
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Динамичен анализ: приложението наистина се вдига и му се задават въпроси.
+  #
+  # Какво хваща това, което четенето на код не хваща: маршрут, който не се
+  # регистрира след разместване на импорти; защита, която съществува в кода, но не
+  # е закачена за маршрута; счупен път, който се минава само при стартиране.
+  # Всичко това изглежда напълно наред при преглед и при зелени модулни тестове,
+  # защото тестовете вдигат приложението по друг начин.
+  # ─────────────────────────────────────────────────────────────────────────────
+  dynamic:
+    name: Динамичен анализ
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: aifos_dynamic
+        options: >-
+          --health-cmd "pg_isready -U test -d aifos_dynamic"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports: ["5432:5432"]
+
+    env:
+      # Временна база, само за този пробег. `AUTO_CREATE_TABLES=false`, за да мине
+      # приложението по същия път като production: схемата идва от Alembic.
+      DATABASE_URL: postgresql+psycopg://test:test@localhost:5432/aifos_dynamic
+      AUTO_CREATE_TABLES: "false"
+      SECRET_KEY: dinamichen-analiz-ne-e-istinski-klyuch-32
+      ENVIRONMENT: test
+      AI_PROVIDER: stub
+
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      - name: Инсталиране
+        run: pip install -r requirements.txt
+
+      - name: Схема от нула
+        run: alembic upgrade head
+
+      - name: Приложението тръгва и отговаря
+        run: |
+          python -m uvicorn app.main:app --port 8000 --log-level warning &
+          echo $! > /tmp/aifos.pid
+          for _ in $(seq 1 40); do
+            curl -fsS http://127.0.0.1:8000/api/v1/health > /tmp/health.json && break
+            sleep 1
+          done
+          python -c "import json;d=json.load(open('/tmp/health.json'));assert d['status']=='ok',d;print('здраво:',d)"
+
+      - name: Базата е достъпна през приложението
+        # Отделно от `/health`: приложението може да отговаря, докато връзката към
+        # базата е счупена — а точно това е най-честият провал след деплой.
+        run: |
+          curl -fsS http://127.0.0.1:8000/api/v1/health/db | \
+            python -c "import json,sys;d=json.load(sys.stdin);assert d['status']=='ok',d;print('базата отговаря')"
+
+      - name: Маршрутите са се закачили
+        # Прагът е нарочно под реалния брой (165 към 31.07.2026): целта е да се
+        # хване ЛИПСВАЩ рутер, а не да се поправя числото при всяка нова функция.
+        run: |
+          n=$(curl -fsS http://127.0.0.1:8000/openapi.json | python -c "import json,sys;print(len(json.load(sys.stdin)['paths']))")
+          echo "маршрути: $n"
+          [ "$n" -ge 120 ] || { echo "::error::само $n маршрута — рутер не се е закачил"; exit 1; }
+
+      - name: Непознат не влиза
+        # Проверява се на живо, а не по код: зависимост за достъп, която е
+        # дефинирана, но не е подадена на рутера, изглежда напълно наред при четене.
+        run: |
+          for path in /api/v1/companies /api/v1/accounting/journal-entries /api/v1/audit; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8000$path")
+            [ "$code" = "401" ] || { echo "::error::$path върна $code вместо 401"; exit 1; }
+            echo "$path → 401"
+          done
+
+      - name: Грешна парола не пуска
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"nikoy@example.com","password":"kakvoto-i-da-e"}' \
+            http://127.0.0.1:8000/api/v1/auth/login)
+          [ "$code" = "401" ] || { echo "::error::вход с несъществуващ потребител върна $code вместо 401"; exit 1; }
+
+      - name: Спиране
+        if: always()
+        run: kill "$(cat /tmp/aifos.pid)" 2>/dev/null || true
