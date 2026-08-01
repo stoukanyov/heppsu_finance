@@ -168,7 +168,7 @@ def test_sensitive_data_is_scrubbed(raw, must_not_contain):
 
 def test_amounts_survive_scrubbing():
     """Сумите са нужни за възпроизвеждане — само дългите номера се крият."""
-    assert "1250.40" in (service.scrub("Разлика от 1250.40 лв.") or "")
+    assert "1250.40" in (service.scrub("Разлика от 1250.40 EUR") or "")
 
 
 def test_scrubbing_applies_on_the_server_too(client):

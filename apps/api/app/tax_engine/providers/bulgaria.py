@@ -21,7 +21,9 @@ class BulgariaTaxProvider(TaxProvider):
         code="BG-NRA",
         name="България — НАП (ЗДДС)",
         country="BG",
-        currency="BGN",
+        # България е в еврозоната от 01.01.2026 — левът не съществува. Историческите
+        # суми до 31.12.2025 се преизчисляват по фиксирания курс 1 EUR = 1,95583 BGN.
+        currency="EUR",
     )
 
     def compute_declaration(self, entries: list[VatEntry]) -> DeclarationCells:

@@ -236,7 +236,9 @@ def test_monthly_cit_advance_only_may_to_december(client):
     advance = items["cit-advance-monthly:2026-05"]
     assert advance["due_date"] == "2026-05-15"
     assert advance["conditional"] is True
-    assert "3 000 000" in advance["conditional_note"]
+    # Бележката сочи разпоредбата, а не сума: праговете в лева са предефинирани в
+    # закона с приемането на еврото, а не преизчислени по курса.
+    assert "чл. 83, ал. 2 ЗКПО" in advance["conditional_note"]
     # През януари–април месечна авансова вноска не се генерира
     items = _by_key(_get(client, h, "2026-03-01", days_ahead=40))
     assert not [k for k in items if k.startswith("cit-advance-monthly:2026-0")]
