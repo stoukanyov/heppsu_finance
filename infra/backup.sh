@@ -21,7 +21,9 @@
 set -euo pipefail
 
 ENV_NAME="${1:-prod}"
-ENV_DIR="/srv/aifos/${ENV_NAME}"
+# Коренът се подава отвън САМО за да може тестът да пусне скрипта наистина.
+# Cron не подава нищо и пътят на машината е същият, какъвто беше.
+ENV_DIR="${AIFOS_ENV_ROOT:-/srv/aifos}/${ENV_NAME}"
 PROJECT="aifos-${ENV_NAME}"
 BACKUP_DIR="${ENV_DIR}/backups"
 KEEP_DAILY=14
@@ -86,8 +88,39 @@ if [ "$DOW" = "7" ]; then
 fi
 
 # ──────────────────────────── Ротация ────────────────────────────────────────
-ls -1t "$BACKUP_DIR/daily/"*.sql.gz     2>/dev/null | tail -n +$((KEEP_DAILY + 1))  | xargs -r rm -f
-ls -1t "$BACKUP_DIR/weekly/"*.sql.gz    2>/dev/null | tail -n +$((KEEP_WEEKLY + 1)) | xargs -r rm -f
-ls -1t "$BACKUP_DIR/documents/"*.tar.gz 2>/dev/null | tail -n +$((KEEP_DAILY + 1))  | xargs -r rm -f
+# С `find`, а не с `ls <шаблон>`. Несъвпаднал шаблон оставя `ls` да излезе с
+# грешка; `set -o pipefail` я вдига до целия конвейер, а `set -e` убива скрипта.
+#
+# Точно това се случваше на Phobos всяка нощ: `documents/` е празна, докато
+# `storage/` е празна, тъй че третият ред гърмеше и скриптът умираше — след като
+# дъмпът е записан, но преди края. В целия `backup.log` нямаше НИТО ЕДНО „готово",
+# а никой не забеляза, защото копието си беше на място и изходният код не се чете
+# от никого. Открито на 22.08.2026, докато се добавяше клеймото за успех.
+#
+# `find` върху нищо излиза с 0 — празна директория вече е обикновен случай, а не
+# край на света.
+rotate() {
+    local dir="$1" pattern="$2" keep="$3"
+    find "$dir" -maxdepth 1 -type f -name "$pattern" -printf '%T@ %p\n' 2>/dev/null \
+        | sort -rn | tail -n "+$((keep + 1))" | cut -d' ' -f2- | xargs -r rm -f
+}
+
+rotate "$BACKUP_DIR/daily"     '*.sql.gz'  "$KEEP_DAILY"
+rotate "$BACKUP_DIR/weekly"    '*.sql.gz'  "$KEEP_WEEKLY"
+rotate "$BACKUP_DIR/documents" '*.tar.gz'  "$KEEP_DAILY"
+
+# ──────────────────────── Клеймо за успех ────────────────────────────────────
+# Единственото, което провален бекъп не може да напише. Всичко останало лъже
+# успокоително: файлове в директорията има и когато дъмпът е празен, ред в
+# crontab има и когато скриптът гърми всяка нощ, а логът го чете само този,
+# който вече е заподозрял нещо.
+#
+# Форматът е `date -u +%s` — същият файл и същото място, както при Groomelle,
+# My Beagle и Control Center, за да може ЕДНА проверка да гледа всичките.
+# Control Center мери възрастта му; над 26 часа значи пропусната нощ.
+#
+# Стои след ротацията нарочно: дотук всяка грешка е излизала с ненулев код
+# заради `set -e`, тъй че този ред се достига само при бекъп, минал докрай.
+date -u +%s > "${BACKUP_DIR}/LAST_SUCCESS"
 
 echo "[$(date '+%F %T')] готово. Заето: $(du -sh "$BACKUP_DIR" | cut -f1)"
