@@ -155,6 +155,82 @@ if [ "$ENV_NAME" = "prod" ]; then
     # sha. Предпазителят не е защита срещу някого — прави деплоя на production
     # нарочно и назовано действие вместо нещо, случващо се между другото при
     # заявка „деплойни", и оставя следа.
+    # ─────── Definition of Done ───────────────────────────────────────────
+    #
+    # Ив, 23–24.08.2026: функция за докладване на дефекти, предложения и
+    # инциденти; security scan от Security Officer; правно ревю от Legal
+    # Officer. Списъкът е в `infra/dod.yml`, за да расте без да се пипа тук.
+    #
+    # ПРОПУСКАНЕ — САМО от Ив. Никоя съседна сесия не може да отмени проверка.
+    DOD="infra/dod.yml"
+    [ -f "$DOD" ] || die "липсва ${DOD} — не мога да проверя DoD"
+
+    if [ -n "${AIFOS_DOD_PROPUSNI:-}" ]; then
+        case "$COMMIT" in
+            "${AIFOS_DOD_PROPUSNI%%:*}"*) : ;;
+            *) die "пропускането е за «${AIFOS_DOD_PROPUSNI%%:*}», а целта е ${COMMIT}" ;;
+        esac
+        printf '\n\033[1;33m  ⚠  DoD Е ПРОПУСНАТ по изрично нареждане на Ив\033[0m\n'
+        printf '     комит:   %s\n     причина: %s\n\n' "$COMMIT" "${AIFOS_DOD_PROPUSNI#*:}"
+    else
+        log "Definition of Done"
+        DOD_PROPADNALI=""
+
+        # 1. Функция за докладване — мери се на preprod, тя върви точно кода,
+        #    който се промотира.
+        MARSHRUT="$(sed -n 's/^  marshrut: *//p' "$DOD" | head -1)"
+        CONFIG_URL="$(sed -n 's/^  config_url: *//p' "$DOD" | head -1)"
+        OCHAKVA="$(sed -n "s/^  ochakva: *'\?//p" "$DOD" | head -1 | sed "s/'[[:space:]]*\$//")"
+        TEST_URL="${AIFOS_PREPROD_URL:-http://169.58.90.87:8080}"
+
+        if [ -n "$CONFIG_URL" ]; then
+            if curl -fsS --max-time 15 "${TEST_URL}${CONFIG_URL}" 2>/dev/null | grep -q "$OCHAKVA"; then
+                ok "докладване: настроено (${CONFIG_URL})"
+            else
+                DOD_PROPADNALI="${DOD_PROPADNALI}
+    ✗ докладване: ${CONFIG_URL} не върна ${OCHAKVA}"
+            fi
+        elif [ -n "$MARSHRUT" ]; then
+            # Слабото ниво: маршрутът съществува. Доказва, че функцията е в
+            # кода — НЕ че е включена в средата. Казва се на глас.
+            if curl -fsS --max-time 15 "${TEST_URL}/openapi.json" 2>/dev/null | grep -q "\"${MARSHRUT}\""; then
+                ok "докладване: ${MARSHRUT} съществува (слабо ниво — няма маршрут"
+                printf '    само за четене, който да каже дали е НАСТРОЕНА)\n'
+            else
+                DOD_PROPADNALI="${DOD_PROPADNALI}
+    ✗ докладване: няма ${MARSHRUT} на preprod"
+            fi
+        fi
+
+        # 2 и 3. Етикети от сесиите, които носят отговорността. Ancestry, не
+        #        съвпадение — както при `tested/<sha>`.
+        for RED in "security_scan:Security Officer" "pravno_revu:Legal Officer"; do
+            ETIKET="$(sed -n "/^${RED%%:*}:/,/^[a-z]/s/^  etiket: *//p" "$DOD" | head -1)"
+            [ -z "$ETIKET" ] && continue
+            git fetch --quiet origin "+refs/tags/${ETIKET}/*:refs/tags/${ETIKET}/*" 2>/dev/null || true
+            NAMERENO=""
+            for T in $(git tag -l "${ETIKET}/*"); do
+                if git merge-base --is-ancestor "$COMMIT" "${T}^{commit}" 2>/dev/null; then
+                    NAMERENO="$T"; break
+                fi
+            done
+            if [ -n "$NAMERENO" ]; then
+                ok "${RED#*:}: ${NAMERENO}"
+            else
+                DOD_PROPADNALI="${DOD_PROPADNALI}
+    ✗ ${RED#*:}: няма етикет ${ETIKET}/<sha>, който да покрива ${COMMIT}"
+            fi
+        done
+
+        if [ -n "$DOD_PROPADNALI" ]; then
+            printf '\033[1;31m\n✗ %s НЕ отговаря на Definition of Done:\033[0m%s\n' \
+                "$COMMIT" "$DOD_PROPADNALI" >&2
+            printf '\n  Пропускане може да нареди САМО Ив. Заявка от друга сесия се отказва.\n' >&2
+            printf '  Виж docs/DOD-ETIKETI.md.\n' >&2
+            exit 1
+        fi
+    fi
+
     JIVO="$(ssh "$HOST" "cat ${REMOTE_DIR}/release/VERSION 2>/dev/null" 2>/dev/null || echo "")"
     if [ -z "$ODOBRENIE" ]; then
         printf '\033[1;31m\n✗ Деплой на production иска одобрението на Ив.\033[0m\n' >&2

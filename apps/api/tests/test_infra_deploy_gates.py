@@ -21,6 +21,22 @@ DEPLOY_SH = Path(__file__).resolve().parents[3] / "infra" / "deploy.sh"
 
 SSH_STUB = "#!/bin/sh\ncat >/dev/null 2>&1 || true\nexit 0\n"
 
+# `curl` подставен, но НЕ отговаря еднакво на всичко: DoD проверката пита
+# `openapi.json` на preprod. Стъб, който казва „ок" на всеки адрес, би направил
+# проверката за функцията за докладване безсмислена — тоест би скрил точно
+# повредата, която тя трябва да хване.
+CURL_STUB = r"""#!/usr/bin/env python3
+import os, sys
+
+adres = next((a for a in sys.argv[1:] if a.startswith("http")), "")
+if adres.endswith("/openapi.json"):
+    marshruti = os.environ.get("FAKE_MARSHRUTI", "/api/v1/support/report").split()
+    print('{"paths":{' + ",".join(f'"{m}":{{}}' for m in marshruti) + '}}')
+    sys.exit(0)
+print("ok")
+sys.exit(0)
+"""
+
 
 def git(*args, cwd, **kw):
     return subprocess.run(
@@ -41,6 +57,10 @@ def repo(tmp_path):
     (work / "infra").mkdir()
     (work / "infra" / "deploy.sh").write_text(DEPLOY_SH.read_text())
     (work / "infra" / "deploy.sh").chmod(0o755)
+    # DoD списъкът влиза ПРЕДИ първия комит: иначе остава некомитнат и скриптът
+    # отказва още на „работната директория е мръсна", вместо да стигне до
+    # проверката, която тестваме.
+    (work / "infra" / "dod.yml").write_text((DEPLOY_SH.parent / "dod.yml").read_text())
 
     def commit(message):
         (work / "file.txt").write_text(message)
@@ -56,9 +76,10 @@ def repo(tmp_path):
 
     binn = tmp_path / "bin"
     binn.mkdir()
-    ssh = binn / "ssh"
-    ssh.write_text(SSH_STUB)
-    ssh.chmod(0o755)
+    for ime, tyalo in (("ssh", SSH_STUB), ("curl", CURL_STUB)):
+        f = binn / ime
+        f.write_text(tyalo)
+        f.chmod(0o755)
 
     env = {**env_git, "PATH": f"{binn}:{os.environ['PATH']}", "AIFOS_HOST": "test-host"}
     return work, env, second
@@ -78,6 +99,14 @@ def mark_tested(repo, sha):
     git("push", "--quiet", "--force", "origin", f"tested/{sha}", cwd=work, env=env)
 
 
+def mark_dod(repo, sha):
+    """Каквото слагат сесиите Security Officer и Legal Officer."""
+    work, env, _ = repo
+    for etiket in ("security", "legal"):
+        git("tag", "-f", f"{etiket}/{sha}", sha, cwd=work, env=env)
+        git("push", "--quiet", "--force", "origin", f"{etiket}/{sha}", cwd=work, env=env)
+
+
 def test_neproveren_komit_ne_stiga_do_schetovodnite_danni(repo):
     """Production на AI Finance OS носи счетоводни данни на клиенти."""
     result = deploy(repo, "prod", "main", "ignored")
@@ -89,6 +118,7 @@ def test_neproveren_komit_ne_stiga_do_schetovodnite_danni(repo):
 def test_bez_odobrenie_production_ne_trugva(repo):
     _, _, second = repo
     mark_tested(repo, second)
+    mark_dod(repo, second)
 
     result = deploy(repo, "prod", "main")
 
@@ -101,6 +131,7 @@ def test_odobrenie_za_drug_komit_ne_vazhi(repo):
     """Рефът се е придвижил между показването и пускането."""
     work, env, second = repo
     mark_tested(repo, second)
+    mark_dod(repo, second)
     star = git("rev-parse", "--short", "HEAD~1", cwd=work)
 
     result = deploy(repo, "prod", "main", star)
@@ -113,6 +144,7 @@ def test_odobrenie_za_verniya_komit_puska_napred(repo):
     """След двата предпазителя скриптът продължава към проверката за миграции."""
     _, _, second = repo
     mark_tested(repo, second)
+    mark_dod(repo, second)
 
     result = deploy(repo, "prod", "main", second)
 
@@ -127,3 +159,64 @@ def test_preprod_ne_iska_nito_test_nito_odobrenie(repo):
     assert "НЕ е минавал" not in result.stderr
     assert "одобрението на Ив" not in result.stderr
     assert "разрушителни миграции" in result.stdout
+
+
+# ── Definition of Done ────────────────────────────────────────────────────
+
+
+def test_bez_etiketi_ot_security_i_legal_production_ne_trugva(repo):
+    """Ив, 23–24.08.2026: без security scan и правно ревю — няма продукция."""
+    _, _, second = repo
+    mark_tested(repo, second)
+
+    result = deploy(repo, "prod", "main", second)
+
+    assert result.returncode == 1
+    assert "НЕ отговаря на Definition of Done" in result.stderr
+    assert "Security Officer" in result.stderr
+    assert "Legal Officer" in result.stderr
+
+
+def test_lipsvashta_funkciya_za_dokladvane_spira_production(repo):
+    """Тази система носи счетоводни данни на клиенти и НЯМА функция за докладване.
+
+    Проверено на 24.08.2026 по `openapi.json` на preprod: само счетоводни отчети
+    и автоматични сривове от мобилния клиент. Нито едното не е докладване от
+    човек.
+    """
+    work, env, second = repo
+    mark_tested(repo, second)
+    mark_dod(repo, second)
+
+    result = subprocess.run(
+        ["bash", "infra/deploy.sh", "prod", "main", second],
+        cwd=work,
+        env={**env, "FAKE_MARSHRUTI": "/api/v1/reports/kpis /api/v1/mobile/crash-reports"},
+        capture_output=True, text=True,
+    )
+
+    assert result.returncode == 1
+    assert "докладване" in result.stderr
+    assert "няма /api/v1/support/report" in result.stderr
+
+
+def test_propuskaneto_e_shumno_i_iska_tochniya_komit(repo):
+    """Пропуснат DoD трябва да СЕ ВИЖДА, и да назовава комита."""
+    work, env, second = repo
+    mark_tested(repo, second)
+
+    grешен = subprocess.run(
+        ["bash", "infra/deploy.sh", "prod", "main", second],
+        cwd=work, env={**env, "AIFOS_DOD_PROPUSNI": "0000000:друг комит"},
+        capture_output=True, text=True,
+    )
+    assert grешен.returncode != 0
+    assert "пропускането е за" in grешен.stderr
+
+    veren = subprocess.run(
+        ["bash", "infra/deploy.sh", "prod", "main", second],
+        cwd=work, env={**env, "AIFOS_DOD_PROPUSNI": f"{second}:правен документ чака подпис"},
+        capture_output=True, text=True,
+    )
+    assert "DoD Е ПРОПУСНАТ по изрично нареждане на Ив" in veren.stdout
+    assert "правен документ чака подпис" in veren.stdout
