@@ -22,6 +22,7 @@ set -euo pipefail
 
 ENV_NAME="${1:-}"
 GIT_REF="${2:-HEAD}"
+ODOBRENIE="${3:-${AIFOS_ODOBRENIE:-}}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 log()  { printf '\n\033[1;36m▸ %s\033[0m\n' "$*"; }
@@ -43,7 +44,7 @@ case "$ENV_NAME" in
              HTTP_PORT=8080; HTTPS_PORT=8443; WORKERS=2; APP_ENV=staging ;;
     demo)    SSH_CANDIDATES="deimos-deploy deploy@169.58.90.87"
              HTTP_PORT=8081; HTTPS_PORT=8444; WORKERS=1; APP_ENV=staging ;;
-    *) die "употреба: $0 {preprod|demo|prod} [git-ref]" ;;
+    *) die "употреба: $0 {preprod|demo|prod} [git-ref] [комит, одобрен от Ив]" ;;
 esac
 
 # Как се намира машината, в този ред:
@@ -104,6 +105,76 @@ if [ -n "$(git status --porcelain)" ]; then
         die "работната директория е мръсна — production се деплойва от таг, не от '${GIT_REF}'"
     fi
     printf '\033[1;33m  ! има некомитнати промени — те НЕ влизат в този деплой\033[0m\n'
+fi
+
+# ─────────── Два предпазителя пред production ─────────────────────────────────
+#
+# Правилата на Ив от 23.08.2026: „всеки деплой първо трябва да мине през тест.
+# деплой на продукция се случва само след мое одобрение."
+#
+# Тестовата среда тук е `preprod`. Записът за „минало е през тест" е ЕТИКЕТ в
+# git (`tested/<sha>`), а не файл на машина: преживява пресъздаването на средата,
+# вижда се отвсякъде и не спира production деплоя, когато Deimos е недостъпен.
+#
+# Проверява се ancestry, а не съвпадение на комити: таг и клон са различни
+# обекти дори при еднакво съдържание. Ако целта е предшественик на нещо
+# тествано, значи всичко в нея вече е било на preprod.
+if [ "$ENV_NAME" = "prod" ]; then
+    log "Минало ли е през preprod"
+    git fetch --quiet origin '+refs/tags/tested/*:refs/tags/tested/*' 2>/dev/null || true
+
+    TESTVAN=""
+    for etiket in $(git tag -l 'tested/*'); do
+        if git merge-base --is-ancestor "$COMMIT" "${etiket}^{commit}" 2>/dev/null; then
+            TESTVAN="$etiket"
+            break
+        fi
+    done
+
+    if [ -z "$TESTVAN" ]; then
+        printf '\033[1;31m\n✗ %s НЕ е минавал през preprod.\033[0m\n' "$COMMIT" >&2
+        printf '\n  Правилото: всеки деплой минава първо през тест.\n' >&2
+        printf '  Пусни:  %s preprod %s\n' "$0" "$GIT_REF" >&2
+        printf '  и когато средата е потвърдена, повтори този деплой.\n' >&2
+        if [ -n "$(git tag -l 'tested/*')" ]; then
+            printf '\n  Тествани досега:\n' >&2
+            for t in $(git tag -l 'tested/*' | tail -5); do
+                printf '    %s  %s\n' "$t" \
+                    "$(git log -1 --format='%ad %s' --date=short "${t}^{commit}" 2>/dev/null)" >&2
+            done
+        fi
+        exit 1
+    fi
+    ok "${COMMIT} се съдържа в ${TESTVAN}"
+
+    # Одобрението е ИЗРИЧНО назоваване на комита, не флаг „да": „да" одобрява
+    # каквото се случи да е на рефа в момента, а sha — точно това, което е било
+    # показано.
+    #
+    # ЧЕСТНО ЗА ГРАНИЦАТА: скрипт не може да различи Ив от сесия, написала същия
+    # sha. Предпазителят не е защита срещу някого — прави деплоя на production
+    # нарочно и назовано действие вместо нещо, случващо се между другото при
+    # заявка „деплойни", и оставя следа.
+    JIVO="$(ssh "$HOST" "cat ${REMOTE_DIR}/release/VERSION 2>/dev/null" 2>/dev/null || echo "")"
+    if [ -z "$ODOBRENIE" ]; then
+        printf '\033[1;31m\n✗ Деплой на production иска одобрението на Ив.\033[0m\n' >&2
+        printf '\n  Кандидат:  %s  %s\n' "$COMMIT" "$(git log -1 --format='%s' "$COMMIT")" >&2
+        if [ -n "$JIVO" ]; then
+            printf '  Живо сега: %s\n\n  Влиза:\n' "$JIVO" >&2
+            git log --oneline --no-decorate "${JIVO}..${COMMIT}" 2>/dev/null | sed 's/^/    /' >&2 \
+                || printf '    (не мога да сравня — липсва %s локално)\n' "$JIVO" >&2
+        else
+            printf '  Живо сега: нищо (първо пускане)\n' >&2
+        fi
+        printf '\n  Покажи горното на Ив. Ако одобри, повтори с:\n' >&2
+        printf '    %s %s %s %s\n' "$0" "$ENV_NAME" "$GIT_REF" "$COMMIT" >&2
+        exit 1
+    fi
+    case "$COMMIT" in
+        "$ODOBRENIE"*) ok "одобрение: ${ODOBRENIE}" ;;
+        *) die "одобрен е «${ODOBRENIE}», а на ${GIT_REF} сега стои ${COMMIT}.
+  Рефът се е придвижил след одобрението. Покажи новото на Ив." ;;
+    esac
 fi
 
 log "Проверка за разрушителни миграции"
@@ -299,6 +370,18 @@ if [ -d release.old ] && docker image inspect "aifos-api:${PROJECT}-previous" >/
 fi
 REMOTE
     die "деплоят се провали"
+fi
+
+# Етикетът се слага след като health gate е минал, не след като docker е казал
+# „up". Деплой, който не е стигнал до отговарящо приложение, не е минал през тест.
+if [ "$ENV_NAME" = "preprod" ]; then
+    if git tag -f "tested/${COMMIT}" "$COMMIT" >/dev/null 2>&1 \
+       && git push --quiet --force origin "tested/${COMMIT}" 2>/dev/null; then
+        ok "отбелязан като тестван: tested/${COMMIT}"
+    else
+        printf '\033[1;33m  ! не можах да отбележа tested/%s в origin\033[0m\n' "$COMMIT" >&2
+        printf '    production ще откаже този комит, докато това не стане\n' >&2
+    fi
 fi
 
 ok "ДЕПЛОЙ УСПЕШЕН: ${ENV_NAME} ← ${DESCRIBE}"
