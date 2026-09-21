@@ -96,8 +96,11 @@ def check_arb(repo: Path, arbs: dict[str, dict]) -> None:
 def check_links(repo: Path, online: bool) -> None:
     dart = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in repo.glob("lib/**/*.dart"))
     urls = set(re.findall(r"https://[^\s'\"]+(?:privacy|terms|policy|legal)[^\s'\"]*", dart))
+    # Dog Journey строи връзката от базата на средата: '${base}/legal/privacy/$lang'
+    # (legal_links.dart) — пътят е доказателството, не буквалният https.
+    urls |= set(re.findall(r"/legal/(?:privacy|terms)[^\s'\"]*", dart))
     privacy = [u for u in urls if "privacy" in u or "policy" in u]
-    terms = [u for u in urls if "terms" in u or "legal" in u]
+    terms = [u for u in urls if "terms" in u or ("legal" in u and "privacy" not in u)]
     (ok if privacy else no)("политика за поверителност в кода", ", ".join(privacy) or "няма https://…privacy… в lib/")
     (ok if terms else no)("условия за ползване в кода", ", ".join(terms) or "няма https://…terms… в lib/ (Apple 3.1.2(c), M3)")
     uses_launcher = "url_launcher" in (repo / "pubspec.yaml").read_text(encoding="utf-8")
