@@ -119,3 +119,37 @@ Google Play:
 ## 4. Къде живее това
 - Този файл (`Business Partner/docs/STORE-REJECTIONS.md`) е каналният запис; указател към него има в `~/.claude/CLAUDE.md`, за да го виждат всички сесии във всички репота.
 - Историята по подавания на Beagle Owner и точните API извиквания са в паметта на Business Partner сесията (`reference-app-store-review-history-beagle-owner`, `reference-store-api-procedures`, `reference-store-rules-that-stopped-us`).
+
+---
+
+## 5. Правилата дословно — това, срещу което се проверява всеки билд
+
+Извлечени от developer.apple.com (App Review Guidelines, „Auto-renewable
+subscriptions“) и support.google.com (Play Subscriptions policy) на 21.09.2026.
+Правилото се чете оттук, не се предполага.
+
+### Apple
+- **3.1.2(c) Subscription Information:** „Before asking a customer to subscribe, you should clearly describe what the user will get for the price… Ensure you clearly communicate the requirements described in Schedule 2.“
+- **Sign-up screen (Apple, Auto-renewable subscriptions):** трябва да съдържа „Subscription name and duration, and the content or services provided during the subscription period; Full renewal price, shown clearly and prominently, and localized in available currencies; A way for current subscribers to sign in or restore purchases.“
+- **Billing amount:** „In the purchase flow, the amount that will be billed must be the most prominent pricing element in the layout… breakdown price… or savings… should be displayed in a subordinate position and size.“
+- **Free trials:** „In the purchase flow for a free trial, clearly indicate how long the free trial lasts and the price billed once the free trial is over.“ (→ M4: едно изречение над бутона)
+- **3.1.2(a):** trial „by providing the relevant information set forth in App Store Connect“; абонаментът работи на всички устройства на човека; scam/bait-and-switch = сваляне от програмата.
+- **3.1.2(b):** upgrade/downgrade без възможност човек неволно да се абонира за две вариации на едно и също (→ една група).
+- **3.1.1:** отключване на функции само през In-App Purchase — никакви ключове, кодове, външни плащания.
+- **2.3.10:** „don't include names, icons, or imagery of other mobile platforms or alternative app marketplaces in your app or metadata“ (→ A8/M2).
+- **5.1.1(i):** политика за поверителност „in the App Store Connect metadata field and within the app in an easily accessible manner“, с какво се събира, с кого се споделя, как се трие.
+- **5.1.1(v):** без акаунт, ако няма значими функции по акаунт; има ли регистрация — има и изтриване в приложението.
+- **4.3(a)/(b):** без много Bundle ID-та на едно и също приложение; без неразличими клонинги.
+
+### Google Play (Subscriptions policy)
+- Преди покупка: „clearly and explicitly disclosing your offer terms, the cost of your subscription, the frequency of your billing cycle, the automatic renewal terms, whether a subscription is required to use the app, and any other material information.“
+- „Users should not have to perform any additional action to review the information.“ (→ не под бутона, не след скрол, не в друг екран)
+- Trial/intro: „clearly and accurately describe the terms of your offer, including the duration, pricing… how and when a free trial will convert to a paid subscription, how much the paid subscription will cost, and how a user can cancel.“
+- Спиране: „clearly disclose how a user can manage or cancel their subscription“ с „direct access to your cancellation process“ — линк към Play Subscription Center от настройките или еквивалентна страница (→ `pro-manage-link`).
+- Unacknowledged purchase → анулиране в 3 дни (P1); trial само на едно място (P2); Repetitive Content (P3).
+
+### Механизъм
+`tools/store_gate.py <репо> [--online]` в това репо; вика се преди всеки
+`release_build`, червен ред спира билда. Останалото (демо акаунти, sandbox
+покупка, 5 резолюции, RTDN, елементите на подаването) — чеклистът в раздел 3
+и `tool/store/review_gate.py` в репото на приложението.
