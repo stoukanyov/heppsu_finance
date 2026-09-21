@@ -77,6 +77,9 @@ Apple:
 9. Sandbox покупка от край до край срещу production бекенда — доказана с лог.
 10. 5 резолюции/устройства реално прегледани; никакво съобщение за грешка извън l10n.
 11. При отказ: Reply в нишката → поправка → Resubmit от UI → API: `WAITING_FOR_REVIEW`, елементи `READY_FOR_REVIEW`.
+12. **2.3.10**: никакви имена/икони на други платформи в приложението и метаданните — името на магазина идва от `Platform`, никога от превода (тест: ARB без „Google Play“/„App Store“/„Android“ — и в двете приложения).
+13. **4.3 / решение на Ив, 21.09.2026**: пред ревюърите никаква следа от общия бекенд, от Beagle Owner или от споделения абонамент — нито в Notes, нито в описанията, нито на екран, който демо акаунтът може да отвори (тест над `docs/store/*`; проверка на ASC/Play локалите преди качване).
+14. **Review Environment**: ревюърът ползва и **iPad** (21.09.2026: iPad Air 11" M3) — дори при `TARGETED_DEVICE_FAMILY = 1` екраните се гледат в iPhone-режим на iPad; нищо не бива да зависи от ширината.
 
 Google Play:
 1. `verify_purchase` за Android работи срещу production (лицензиран тестер купува, сървърът потвърждава, `acknowledgementState=1`).
@@ -84,6 +87,24 @@ Google Play:
 3. Пробен период само на едно място (хъб **или** базов план).
 4. App content въпросникът по шаблона; Data safety съвпада с реалните SDK-та.
 5. Един package name за продукт — никакви варианти по порода/град/тема.
+6. Play Subscriptions policy: преди покупката — цена, честота на таксуване, автоматично подновяване, кога и как пробният период става платен и как се отказва — **на самия екран, без допълнително действие**; в приложението има път към отказ (Manage in Google Play).
+
+### Дословно от насоките (свалено 21.09.2026; източниците са в `reference-store-rules-that-stopped-us`)
+| правило | цитат | механизъм при нас |
+|---|---|---|
+| Apple 2.3.10 | „don't include names, icons, or imagery of other mobile platforms or alternative app marketplaces in your app or metadata“ | ARB guard тест (BO `store_names_per_platform_test`, DJ `store_metadata_guard_test`); `listings_upload.py` отказва „Google Play/Android“ в ASC текст и „App Store/iOS/iPhone“ в Play текст |
+| Apple 2.3.7 | „Metadata … should not include prices, terms, or descriptions that are not specific to the metadata type“; „should not … reference other apps“ | `check()` в `listings_upload.py`: без цена, без „Beagle“ |
+| Apple 2.3.1(a) | „All new features … must be described with specificity in the Notes for Review“ | Notes се обновяват при всяко подаване (`review-notes-*.md`) |
+| Apple 2.1(a)/(b) | „include demo account info (and turn on your back-end service!)“; „make sure [IAP] are complete … visible to the reviewer and functional“ | два демо акаунта в production, проверени с curl; подаване с 3 елемента |
+| Apple 3.1.2(a) | „Subscriptions must work on all of the user's devices … Learn more about sharing a subscription across your apps“ | хъбът + леджърът; **не се обявява** пред ревюърите (т. 13) |
+| Apple subscriptions page | „the amount that will be billed must be the most prominent pricing element in the layout“; „clearly indicate how long the free trial lasts and the price billed once the free trial is over“; „A way for current subscribers to sign in or restore purchases“; „links to your Terms of Use and Privacy Policy“ | тестове за prominence, trial бележка, Restore, LegalLinks на paywall-а |
+| Apple subscriptions page | „verify that they're active subscribers before showing any subscription options“ (multi-app) | `PlusState.includedElsewhere` — без бутон за покупка |
+| Apple 5.1.1(v) | „If your app supports account creation, you must also offer account deletion within the app“; „let people use it without a login“ | local-first; DeleteAccountScreen 🧪 |
+| Apple 5.1.1(i) | „link to their privacy policy … within the app in an easily accessible manner“ | LegalLinks на paywall, регистрация, Акаунт |
+| Apple 1.2 | „A mechanism to report offensive content … The ability to block abusive users … Published contact information“ | F11 преди пускане на глутницата |
+| Apple 4.3(a)/(b) | „Don't create multiple Bundle IDs of the same app“; „indistinguishable from what's already widely available“ | различна IA, име с продуктов сигнал, никакво споменаване на BO |
+| Play Subscriptions | „clearly and explicitly disclosing your offer terms, the cost … the frequency of your billing cycle, the automatic renewal terms“; „Users should not have to perform any additional action to review the information“ | `SubscriptionPrice` renewalNote на екрана |
+| Play Subscriptions | „clearly disclose how a user can manage or cancel their subscription“ | бутон Manage in Google Play на Android |
 
 ---
 
