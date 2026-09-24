@@ -149,6 +149,26 @@ def check_plist(repo: Path, arbs: dict[str, dict]) -> None:
         ask("езици на purpose strings", f"ARB има {", ".join(gap)}, InfoPlist.strings няма")
 
 
+def check_notes(repo: Path) -> None:
+    """Бележките за ревюъра: дължина и как се говори за AI.
+
+    M5 (24.09.2026): „no AI service“ в списък с липси донесе 2.1 и въпроси.
+    Темата или не се отваря, или се затваря докрай.
+    """
+    files = list(repo.glob("docs/store-assets/apple-review/review-notes.txt")) + \
+        list(repo.glob("store/apple-review/review-notes.txt"))
+    if not files:
+        ask("бележки за ревюъра", "няма review-notes.txt")
+        return
+    text = files[0].read_text(encoding="utf-8")
+    (no if len(text) > 4000 else ok)("бележки ≤ 4000 знака", str(len(text)))
+    mentions_ai = re.search(r"\bAI\b|artificial intelligence|machine learning", text)
+    if mentions_ai:
+        answered = re.search(r"NO artificial intelligence|no artificial intelligence or machine learning", text)
+        (ok if answered else no)("бележките обясняват AI, не само го отричат в списък",
+                                 "" if answered else "„AI“ се споменава мимоходом — M5: това носи 2.1 с три въпроса")
+
+
 def check_store_text(repo: Path) -> None:
     files = sorted(repo.glob("tool/store_text/*.json")) + sorted(repo.glob("store/text/*.json"))
     if not files:
@@ -180,6 +200,7 @@ def main() -> int:
     check_links(repo, online)
     check_plist(repo, arbs)
     check_store_text(repo)
+    check_notes(repo)
     for state, what, detail in rows:
         print(f"{state}\t{what}\t{detail}")
     return 1 if any(r[0] == "NO" for r in rows) else 0
