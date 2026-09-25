@@ -22,7 +22,7 @@ import urllib.request
 from pathlib import Path
 
 PRICE = re.compile(r"\d[.,]\d\d ?(EUR|€|USD|\$|£|лв)|(EUR|€|USD|\$|£) ?\d")
-CYRILLIC = re.compile(r"[Ѐ-ӿ]")
+CYRILLIC = re.compile(r"[Ѐ-ӿ]+")
 CYRILLIC_LANGS = {"bg", "ru", "uk", "sr", "mk", "be"}
 AUTO_CHARGE = re.compile(
     r"automat|charged|renew|таксува|abgebucht|cobra|prélev|terhel|addebit|pobier|încas|cobrado",
@@ -114,8 +114,71 @@ def check_arb(repo: Path, arbs: dict[str, dict]) -> None:
     (no if cyr else ok)("кирилица извън bg/ru/uk/sr", ", ".join(cyr[:6]) or "няма")
 
 
+#: Как изглежда „проверка за абонамент" в клиентски Dart код.
+_ENTITLEMENT_USE = re.compile(r"\b(isPlus|isSubscribed|hasSubscription|entitlement\.entitled|SubscriptionRequired)\b")
+#: Файловете, които САМИ пресмятат абонамента — там употребата не е гейт.
+_BILLING_FILE = re.compile(r"(billing|entitlement|subscription|purchase|store_gateway)[^/]*\.dart$")
+
+
+def _check_subscription_unlocks_something(sources: list[Path]) -> None:
+    """Абонамент, който не отключва нищо, е отказ и измама едновременно.
+
+    App Review проверява точно това („what does the subscription unlock?"), а
+    човекът плаща за услуга без услуга. Dog Journey стоеше така до 25.09.2026:
+    `isPlus` беше пресметнат правилно и не се ползваше никъде — глутницата,
+    споделянето с ветеринар и облачното копие бяха достъпни и без плащане, а
+    описанието в магазина ги изброяваше като ползи на Plus.
+
+    Признакът е употреба на състоянието ИЗВЪН слоя, който го пресмята: екран,
+    който показва врата, или заявка, която го проверява. Употреба само в
+    `billing_controller.dart` значи „пресметнато, но неизползвано".
+    """
+    users = sorted(
+        {
+            p.name
+            for p in sources
+            if not _BILLING_FILE.search(p.as_posix()) and _ENTITLEMENT_USE.search(p.read_text(encoding="utf-8", errors="ignore"))
+        }
+    )
+    (ok if users else no)(
+        "абонаментът отключва нещо",
+        ", ".join(users[:4]) if users else "състоянието на абонамента не се ползва никъде извън билинга",
+    )
+
+
+def _workspace_packages(repo: Path) -> list[Path]:
+    """Пакетите на същото хранилище, от които това приложение зависи по път.
+
+    Чете `dependencies:` с `path:` от pubspec.yaml — без да внася yaml
+    библиотека заради три реда. Връща само съществуващи папки ВЪТРЕ в
+    хранилището; чужд път (например пакет от pub кеша) не е наш код.
+    """
+    pubspec = repo / "pubspec.yaml"
+    if not pubspec.exists():
+        return []
+    found: list[Path] = []
+    for match in re.finditer(r"^\s*path:\s*(\S+)\s*$", pubspec.read_text(encoding="utf-8"), re.MULTILINE):
+        candidate = (repo / match.group(1)).resolve()
+        if candidate.is_dir() and candidate != repo.resolve():
+            found.append(candidate)
+    return found
+
+
 def check_links(repo: Path, online: bool) -> None:
-    dart = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in repo.glob("lib/**/*.dart"))
+    # Генерираните преводи не са код: там думата „абонамент" е текст за
+    # потребителя („плащаш веднъж, без абонамент"), не продукт.
+    sources = [p for p in repo.glob("lib/**/*.dart") if "l10n/generated" not in p.as_posix()]
+    # Кодът на приложението не е само в неговата `lib/`: в pub workspace
+    # (Dog Journey) идентификаторите на продуктите и целият общ слой живеят в
+    # съседен пакет. Без него гейтът обяви абонамента за еднократна покупка и
+    # пропусна проверката за връзка към отказване (25.09.2026).
+    sources += [
+        p
+        for local in _workspace_packages(repo)
+        for p in local.glob("lib/**/*.dart")
+        if "l10n/generated" not in p.as_posix()
+    ]
+    dart = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in sources)
     urls = set(re.findall(r"https://[^\s'\"]+(?:privacy|terms|policy|legal)[^\s'\"]*", dart))
     # Dog Journey строи връзката от базата на средата: '${base}/legal/privacy/$lang'
     # (legal_links.dart) — пътят е доказателството, не буквалният https.
@@ -131,14 +194,22 @@ def check_links(repo: Path, online: bool) -> None:
     # Правилото за „достъп до отказване" е на абонаментите. Приложение само с
     # еднократни покупки (non-consumable) няма какво да се отказва - искането
     # на такава връзка там е измислен отказ, не предпазна мярка.
-    # `StreamSubscription`/`_subscription` е Dart клас за поток, не продукт -
-    # без това всяко приложение с in_app_purchase изглежда като абонаментно.
-    dart_wo_streams = re.sub(r"\bStreamSubscription\b|_subscription\b", "", dart)
-    sells_subscription = bool(
-        re.search(r"subscriptions?\b|autoRenew|абонамент", dart_wo_streams, re.I))
+    # Признак за абонамент е API-то за абонаменти, не думата: `StreamSubscription`
+    # е поток, а „без абонамент" в текст е точно обратното на абонамент.
+    sells_subscription = bool(re.search(
+        r"autoRenew|subscriptionPeriod|SubscriptionOffer|ProductType\.subs"
+        r"|productId\s*[:=]\s*'[^']*(monthly|yearly|annual)"
+        # Идентификаторът на продукта невинаги стои до думата `productId`:
+        # Dog Journey го държи в таблица `'plus_monthly': 'com.…plus.monthly'`
+        # и гейтът го обяви за еднократна покупка, тоест пропусна проверката
+        # за връзка към отказване (намерено на 25.09.2026). Признакът е самият
+        # низ, който изглежда като продукт с период.
+        r"|'[\w.]*[._](monthly|yearly|annual)'",
+        dart))
     if has_iap and sells_subscription:
         (ok if manage else no)("връзка за управление/спиране на абонамента",
                                "" if manage else "Play policy: direct access to cancellation → Subscription Center")
+        _check_subscription_unlocks_something(sources)
     elif has_iap:
         ok("покупки", "еднократни (non-consumable) — правилото за отказване на абонамент не важи")
     if online:
@@ -213,6 +284,16 @@ def check_store_text(repo: Path) -> None:
             no("написана цена в описанието", f.name)
         if not re.search(r"https://\S+(terms|privacy)", desc):
             no("правна връзка в описанието", f"{f.name}: няма https://…terms/privacy (M3, A5)")
+        # A4, но в описанието: чужда азбука издава копи-пейст от друг език.
+        # Намерено на живо в японското описание на Calctera (25.09.2026).
+        lang = str(t.get("language", f.stem))
+        if lang not in CYRILLIC_LANGS and CYRILLIC.search(blob):
+            no("кирилица в чуждоезично описание",
+               f"{f.name}: {', '.join(sorted(set(CYRILLIC.findall(blob)))[:3])}")
+        # Дължини, които магазините отрязват мълчаливо.
+        for field, limit in (("title", 30), ("short_description", 80), ("description", 4000)):
+            if field in t and len(str(t[field])) > limit:
+                no(f"{field} ≤ {limit}", f"{f.name}: {len(str(t[field]))}")
     if not any(r[0] == "NO" and "описанието" in r[1] for r in rows):
         ok("описания за магазините", f"{len(files)} езика: без цени, с правна връзка")
 

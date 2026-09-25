@@ -43,6 +43,11 @@ def run(repo: Path) -> dict[str, tuple[str, str]]:
     return {what: (state, detail) for state, what, detail in store_gate.rows}
 
 
+# Както изглежда истински абонамент в кода (Beagle Owner: plus_monthly).
+SUBSCRIPTION_DART = """
+const String productId = 'plus_monthly';
+"""
+
 LEGAL_DART = """
 const kPrivacy = 'https://example.com/app-privacy.html';
 const kTerms = 'https://example.com/app-terms.html';
@@ -85,18 +90,54 @@ def main() -> int:
 
         # 5. Абонамент без връзка за отказване — гейтът пада (правилото остава).
         repo = build_repo(Path(tmp) / "e", arb_dir="l10n", l10n_yaml=True,
-                          dart=LEGAL_DART + "\nconst plan = 'subscription monthly';\n")
+                          dart=LEGAL_DART + SUBSCRIPTION_DART)
         r = run(repo)
         passed.append(case("абонамент без връзка за отказване пада",
                            r.get("връзка за управление/спиране на абонамента", ("", ""))[0] == "NO", str(r)))
 
         # 6. Абонамент СЪС връзка за отказване — минава.
         repo = build_repo(Path(tmp) / "f", arb_dir="l10n", l10n_yaml=True,
-                          dart=LEGAL_DART + "\nconst plan = 'subscription';\n"
+                          dart=LEGAL_DART + SUBSCRIPTION_DART +
                           "const manage = 'https://apps.apple.com/account/subscriptions';\n")
         r = run(repo)
         passed.append(case("абонамент с връзка за отказване минава",
                            r.get("връзка за управление/спиране на абонамента", ("", ""))[0] == "OK", str(r)))
+
+        # 6б. Абонаментът може да живее в СЪСЕДЕН пакет (pub workspace):
+        # Dog Journey държи идентификаторите на продуктите в `dog_core`, а
+        # гейтът четеше само `lib/` на приложението и обяви абонамента за
+        # еднократна покупка — тоест мълчаливо пропусна правилото (25.09.2026).
+        repo = build_repo(Path(tmp) / "ws", arb_dir="l10n", l10n_yaml=True, dart=LEGAL_DART)
+        shared = Path(tmp) / "ws_shared"
+        (shared / "lib").mkdir(parents=True, exist_ok=True)
+        (shared / "lib/products.dart").write_text(
+            "const ids = {'plus_monthly': 'com.heppsu.dogJourney.plus.monthly'};\n", encoding="utf-8")
+        pubspec = repo / "pubspec.yaml"
+        pubspec.write_text(
+            pubspec.read_text(encoding="utf-8") + f"  dog_core:\n    path: {shared}\n", encoding="utf-8")
+        r = run(repo)
+        passed.append(case("абонамент в съседен пакет се вижда",
+                           r.get("връзка за управление/спиране на абонамента", ("", ""))[0] == "NO", str(r)))
+
+        # 6в. Абонамент, който не отключва нищо (Dog Journey до 25.09.2026):
+        # `isPlus` беше пресметнат и не се ползваше никъде — App Review пита
+        # точно „какво отключва абонаментът", а човекът плаща за нищо.
+        repo = build_repo(Path(tmp) / "h", arb_dir="l10n", l10n_yaml=True,
+                          dart=LEGAL_DART + SUBSCRIPTION_DART +
+                          "const manage = 'https://apps.apple.com/account/subscriptions';\n")
+        r = run(repo)
+        passed.append(case("абонамент, който не отключва нищо, пада",
+                           r.get("абонаментът отключва нещо", ("", ""))[0] == "NO", str(r)))
+
+        # 6г. Същото приложение с врата пред функция — минава.
+        repo = build_repo(Path(tmp) / "i", arb_dir="l10n", l10n_yaml=True,
+                          dart=LEGAL_DART + SUBSCRIPTION_DART +
+                          "const manage = 'https://apps.apple.com/account/subscriptions';\n")
+        (repo / "lib/pack_screen.dart").write_text(
+            "Widget build(c) => billing.isPlus ? const Pack() : const PlusWall();\n", encoding="utf-8")
+        r = run(repo)
+        passed.append(case("врата пред функция минава",
+                           r.get("абонаментът отключва нещо", ("", ""))[0] == "OK", str(r)))
 
         # 7. Написана цена в ARB пак пада (A6) — проверката вече вижда ARB-ите.
         repo = build_repo(Path(tmp) / "g", arb_dir="l10n", l10n_yaml=True, dart=LEGAL_DART)
