@@ -45,9 +45,26 @@ def ask(what, detail=""):
     rows.append(("ASK", what, detail))
 
 
+def arb_dirs(repo: Path) -> list[str]:
+    """Къде са ARB файловете: l10n.yaml казва, не предположението.
+
+    Beagle Owner ги държи в lib/l10n, Construction Calculator - в l10n/ на
+    корена (`arb-dir: l10n`). Гейт, който гледа само lib/**, казва „няма
+    ARB" на напълно локализирано приложение и пропуска проверките за цена,
+    „Google Play" и кирилица - точно онова, за което съществува.
+    """
+    cfg = repo / "l10n.yaml"
+    if cfg.exists():
+        m = re.search(r"^arb-dir:\s*(\S+)", cfg.read_text(encoding="utf-8"), re.M)
+        if m:
+            return [f"{m.group(1).strip().rstrip('/')}/**/*.arb"]
+    return ["lib/**/*.arb", "l10n/**/*.arb"]
+
+
 def arb_files(repo: Path) -> dict[str, dict]:
     out = {}
-    for f in sorted(repo.glob("lib/**/*.arb")):
+    found = [f for pat in arb_dirs(repo) for f in repo.glob(pat)]
+    for f in sorted(found):
         m = re.search(r"_([a-z]{2,3})(?:_[A-Z]{2})?\.arb$", f.name)
         if not m:
             continue
@@ -61,7 +78,7 @@ def arb_files(repo: Path) -> dict[str, dict]:
 
 def check_arb(repo: Path, arbs: dict[str, dict]) -> None:
     if not arbs:
-        ask("ARB файлове", "няма lib/**/*.arb — приложението не е локализирано през ARB?")
+        ask("ARB файлове", f"няма ARB в {', '.join(arb_dirs(repo))} — приложението не е локализирано през ARB?")
         return
     ok("езици в ARB", ", ".join(sorted(arbs)))
 
@@ -81,7 +98,11 @@ def check_arb(repo: Path, arbs: dict[str, dict]) -> None:
     # M4: trial изречение — колко трае, сумата, автоматично.
     trial = [f"{lang}:{k}" for lang, a in arbs.items() for k, v in a.items()
              if "{price}" in v and AUTO_CHARGE.search(v)]
-    if any("free" in v.lower() or "trial" in v.lower() or "безплат" in v.lower() for v in arbs.get("en", {}).values()):
+    # „free“ само по себе си не е пробен период: безплатно приложение пише
+    # „free, and staying free“ и няма какво да таксува после. Правилото важи
+    # за текст, който наистина обещава пробен период.
+    TRIAL_WORDS = re.compile(r"free trial|trial|days free|пробен период|безплатен период", re.I)
+    if any(TRIAL_WORDS.search(v) for a in arbs.values() for v in a.values()):
         (ok if trial else no)("trial: сума + „автоматично“ в едно изречение",
                               f"{len(trial)} низа с {{price}} и обяснение" if trial else "има trial текст, но нито един низ с {price} и „charged automatically/renews“")
     else:
@@ -107,9 +128,19 @@ def check_links(repo: Path, online: bool) -> None:
     (ok if uses_launcher else no)("връзките се натискат (url_launcher)", "" if uses_launcher else "адрес като текст не е „functional link“ (M4)")
     manage = re.search(r"apps\.apple\.com/account/subscriptions|play\.google\.com/store/account/subscriptions", dart)
     has_iap = "in_app_purchase" in (repo / "pubspec.yaml").read_text(encoding="utf-8")
-    if has_iap:
+    # Правилото за „достъп до отказване" е на абонаментите. Приложение само с
+    # еднократни покупки (non-consumable) няма какво да се отказва - искането
+    # на такава връзка там е измислен отказ, не предпазна мярка.
+    # `StreamSubscription`/`_subscription` е Dart клас за поток, не продукт -
+    # без това всяко приложение с in_app_purchase изглежда като абонаментно.
+    dart_wo_streams = re.sub(r"\bStreamSubscription\b|_subscription\b", "", dart)
+    sells_subscription = bool(
+        re.search(r"subscriptions?\b|autoRenew|абонамент", dart_wo_streams, re.I))
+    if has_iap and sells_subscription:
         (ok if manage else no)("връзка за управление/спиране на абонамента",
                                "" if manage else "Play policy: direct access to cancellation → Subscription Center")
+    elif has_iap:
+        ok("покупки", "еднократни (non-consumable) — правилото за отказване на абонамент не важи")
     if online:
         for u in sorted(urls):
             # curl, не urllib: python на тази машина няма CA пакет и пада с
