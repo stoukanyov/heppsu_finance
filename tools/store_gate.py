@@ -384,8 +384,16 @@ def check_version(repo: Path, allow_same_version: bool) -> None:
 
     shown = f"{previous[0][0]}.{previous[0][1]}.{previous[0][2]}+{previous[1]} → " \
             f"{current[0][0]}.{current[0][1]}.{current[0][2]}+{current[1]}"
-    if current[0] > previous[0]:
+    if current[1] == previous[1]:
+        # Същият билд, различна версия: това е преномериране ПРЕДИ строенето,
+        # не нов билд. Няма какво да се пази — правилото е за билдовете.
+        ok("версия", f"{shown} — същият билд, преномериране преди строене")
+    elif current[0] > previous[0]:
         ok("версия расте с билда", shown)
+    elif current[0] < previous[0]:
+        no("версия расте с билда",
+           f"{shown}: версията НАМАЛЯВА при нов билд. Магазините не приемат по-малък "
+           f"номер от вече качения")
     elif allow_same_version:
         ask("версия", f"{shown} — същата версия, позволено изрично (--same-version-ok)")
     else:

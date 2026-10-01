@@ -173,6 +173,17 @@ def main() -> int:
         passed.append(case("същата версия минава само с изричен флаг",
                            r.get("версия", ("", ""))[0] == "ASK", str(r.get("версия"))))
 
+        repo = git_repo(Path(tmp) / "v4", ["1.0.0+3", "0.2.0+3"])
+        r = run(repo)
+        passed.append(case("същият билд с друга версия е преномериране, не нарушение",
+                           r.get("версия", ("", ""))[0] == "OK", str(r.get("версия"))))
+
+        repo = git_repo(Path(tmp) / "v5", ["1.0.0+3", "0.9.0+4"])
+        r = run(repo)
+        passed.append(case("по-малка версия при нов билд пада",
+                           r.get("версия расте с билда", ("", ""))[0] == "NO",
+                           str(r.get("версия расте с билда"))))
+
         # 7. Написана цена в ARB пак пада (A6) — проверката вече вижда ARB-ите.
         repo = build_repo(Path(tmp) / "g", arb_dir="l10n", l10n_yaml=True, dart=LEGAL_DART)
         (repo / "l10n/app_en.arb").write_text(
