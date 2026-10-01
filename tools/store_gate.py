@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 import urllib.request
 from pathlib import Path
@@ -305,16 +306,103 @@ def check_store_text(repo: Path) -> None:
         ok("описания за магазините", f"{len(files)} езика: без цени, с правна връзка")
 
 
+#: `version: 1.2.8+81` в pubspec.yaml.
+_VERSION_LINE = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)\s*$", re.MULTILINE)
+
+
+def _version_of(text: str) -> tuple[tuple[int, int, int], int] | None:
+    m = _VERSION_LINE.search(text)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))), int(m.group(4))
+
+
+def check_version(repo: Path, allow_same_version: bool) -> None:
+    """Версията на продукта расте заедно с билда.
+
+    Ив, 06.09.2026: „версията трябва да отразява какво реално е фиксирано или
+    добавено, не просто build номера отзад". Правилото стоеше записано, а
+    механизъм нямаше — и Beagle Owner излезе два пъти подред с вдигнат само
+    билд: 1.2.8+79 → +80 (поправка по Apple 2.3.10) и +80 → +81 (поправка на
+    trial изречението). Живото приложение носи две поправки, които би трябвало
+    да личат като 1.2.9 и 1.2.10.
+
+    Проверката е спрямо ПРЕДИШНАТА стойност в git историята на pubspec.yaml,
+    затова работи офлайн и не зависи от магазина.
+
+    Законното изключение е едно: предишният билд изобщо не е стигнал до
+    магазина (паднал при качване, сгрешен подпис, спрян преди Resubmit) — там
+    същата версия с нов билд е вярна. Тогава се подава `--same-version-ok` и
+    решението остава в историята на командата, вместо да се промъкне тихо.
+    """
+    pubspec = repo / "pubspec.yaml"
+    current = _version_of(pubspec.read_text(encoding="utf-8"))
+    if current is None:
+        ask("версия", "pubspec.yaml няма ред `version: X.Y.Z+B`")
+        return
+    previous = None
+    try:
+        # Първо комитнатото състояние: когато версията е вдигната в работното
+        # дърво (обичайният случай преди билд), сравнението е точно с него.
+        # `git show HEAD:<път>` чете пътя ОТ КОРЕНА на хранилището, а
+        # приложението може да е в подпапка (pub workspace: apps/universal).
+        # Без префикса тук се четеше pubspec.yaml на workspace-а — чужд файл с
+        # чужда версия.
+        prefix = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--show-prefix"],
+            capture_output=True, text=True, timeout=20,
+        ).stdout.strip()
+        head = subprocess.run(
+            ["git", "-C", str(repo), "show", f"HEAD:{prefix}pubspec.yaml"],
+            capture_output=True, text=True, timeout=20,
+        )
+        if head.returncode == 0:
+            committed = _version_of(head.stdout)
+            if committed and committed != current:
+                previous = committed
+        if previous is None:
+            # Версията в дървото вече е комитната — тогава „предишната" е
+            # последната различна стойност в историята на файла.
+            log = subprocess.run(
+                ["git", "-C", str(repo), "log", "-p", "--format=%H", "-20", "--", "pubspec.yaml"],
+                capture_output=True, text=True, timeout=20,
+            ).stdout
+            for line in log.splitlines():
+                if line.startswith("-version:"):
+                    candidate = _version_of(line.replace("-version:", "version:", 1))
+                    if candidate and candidate != current:
+                        previous = candidate
+                        break
+    except (OSError, subprocess.SubprocessError):
+        previous = None
+    if previous is None:
+        ok("версия", f"{current[0][0]}.{current[0][1]}.{current[0][2]}+{current[1]} (няма предишна за сравнение)")
+        return
+
+    shown = f"{previous[0][0]}.{previous[0][1]}.{previous[0][2]}+{previous[1]} → " \
+            f"{current[0][0]}.{current[0][1]}.{current[0][2]}+{current[1]}"
+    if current[0] > previous[0]:
+        ok("версия расте с билда", shown)
+    elif allow_same_version:
+        ask("версия", f"{shown} — същата версия, позволено изрично (--same-version-ok)")
+    else:
+        no("версия расте с билда",
+           f"{shown}: вдигнат е само билдът. Поправка → PATCH, нова функция → MINOR. "
+           f"Ако предишният билд НЕ е стигнал до магазина, повтори с --same-version-ok")
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print(__doc__)
         return 2
     repo = Path(sys.argv[1]).resolve()
     online = "--online" in sys.argv
+    allow_same_version = "--same-version-ok" in sys.argv
     if not (repo / "pubspec.yaml").exists():
         print(f"NO\tрепо\t{repo} няма pubspec.yaml")
         return 1
     arbs = arb_files(repo)
+    check_version(repo, allow_same_version)
     check_arb(repo, arbs)
     check_links(repo, online)
     check_plist(repo, arbs)

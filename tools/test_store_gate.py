@@ -35,9 +35,10 @@ def build_repo(root: Path, *, arb_dir: str, l10n_yaml: bool, dart: str, pubspec_
     return root
 
 
-def run(repo: Path) -> dict[str, tuple[str, str]]:
+def run(repo: Path, allow_same_version: bool = False) -> dict[str, tuple[str, str]]:
     store_gate.rows.clear()
     arbs = store_gate.arb_files(repo)
+    store_gate.check_version(repo, allow_same_version)
     store_gate.check_arb(repo, arbs)
     store_gate.check_links(repo, online=False)
     return {what: (state, detail) for state, what, detail in store_gate.rows}
@@ -138,6 +139,39 @@ def main() -> int:
         r = run(repo)
         passed.append(case("врата пред функция минава",
                            r.get("абонаментът отключва нещо", ("", ""))[0] == "OK", str(r)))
+
+        # 6д. Версията расте заедно с билда (Ив, 06.09.2026; напомнено
+        # 01.10.2026, след като Beagle Owner излезе два пъти подред с вдигнат
+        # само билд: 1.2.8+79 → +80 → +81).
+        import subprocess as sp
+
+        def git_repo(path: Path, versions: list[str]) -> Path:
+            repo = build_repo(path, arb_dir="l10n", l10n_yaml=True, dart=LEGAL_DART)
+            sp.run(["git", "init", "-q"], cwd=repo, check=True)
+            sp.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
+            sp.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+            pubspec = repo / "pubspec.yaml"
+            base = pubspec.read_text(encoding="utf-8")
+            for v in versions:
+                pubspec.write_text(f"version: {v}\n" + base, encoding="utf-8")
+                sp.run(["git", "add", "-A"], cwd=repo, check=True)
+                sp.run(["git", "commit", "-q", "-m", v], cwd=repo, check=True)
+            return repo
+
+        repo = git_repo(Path(tmp) / "v1", ["1.2.8+80", "1.2.8+81"])
+        r = run(repo)
+        passed.append(case("вдигнат само билд пада",
+                           r.get("версия расте с билда", ("", ""))[0] == "NO", str(r.get("версия расте с билда"))))
+
+        repo = git_repo(Path(tmp) / "v2", ["1.2.8+80", "1.2.9+81"])
+        r = run(repo)
+        passed.append(case("вдигнат PATCH минава",
+                           r.get("версия расте с билда", ("", ""))[0] == "OK", str(r.get("версия расте с билда"))))
+
+        repo = git_repo(Path(tmp) / "v3", ["1.2.8+80", "1.2.8+81"])
+        r = run(repo, allow_same_version=True)
+        passed.append(case("същата версия минава само с изричен флаг",
+                           r.get("версия", ("", ""))[0] == "ASK", str(r.get("версия"))))
 
         # 7. Написана цена в ARB пак пада (A6) — проверката вече вижда ARB-ите.
         repo = build_repo(Path(tmp) / "g", arb_dir="l10n", l10n_yaml=True, dart=LEGAL_DART)
