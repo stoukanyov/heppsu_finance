@@ -116,13 +116,16 @@ def check_arb(repo: Path, arbs: dict[str, dict]) -> None:
 
 
 #: Как изглежда „проверка за абонамент" в клиентски Dart код.
-# `plus.has(...)` и `PlusFeatures.` са наименуванията на My Concert Buddy;
+# `plus.has(...)` и `PlusFeatures.` са наименуванията на My Concert Buddy,
+# `isPro`, `ProAction.` и `AppFeature.` — на My Life Within (01.10.2026:
+# гейтът светеше червено на приложение, в което абонаментът ЗАКЛЮЧВА доклада
+# за лекаря, картата на болката и износа — просто с други имена);
 # добавени са тук, а не преименувани там, защото правилото е „абонаментът
 # отключва нещо“, не „кръсти го isPlus“. Изразите са тесни нарочно: голо
 # `has(` би матчнало всеки речник.
 _ENTITLEMENT_USE = re.compile(
-    r"\b(isPlus|isSubscribed|hasSubscription|entitlement\.entitled|SubscriptionRequired)\b"
-    r"|\bplus\.has\(|\bPlusFeatures\."
+    r"\b(isPlus|isPro|isSubscribed|hasSubscription|entitlement\.entitled|SubscriptionRequired)\b"
+    r"|\bplus\.has\(|\bPlusFeatures\.|\bProAction\.|\bAppFeature\."
 )
 #: Файловете, които САМИ пресмятат абонамента — там употребата не е гейт.
 _BILLING_FILE = re.compile(r"(billing|entitlement|subscription|purchase|store_gateway)[^/]*\.dart$")
