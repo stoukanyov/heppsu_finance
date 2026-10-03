@@ -192,6 +192,26 @@ def main() -> int:
         passed.append(case("написана цена в ARB пада (A6)",
                            r.get("написана цена в ARB", ("", ""))[0] == "NO", str(r)))
 
+        # 8. Интерполацията в адреса се разписва, вместо да се отваря буквално.
+        #    На 03.10.2026 гейтът върна NO 404 за `…terms$suffix.html` — адрес,
+        #    който на живо е здрав. Фалшивото червено спира билд без причина.
+        dart = (
+            "final suffix = switch (lang) { 'bg' => '.bg', 'pt' => '.pt', _ => '' };\n"
+            "const u = 'https://example.com/terms$suffix.html';\n"
+        )
+        got = store_gate._url_variants("https://example.com/terms$suffix.html", dart)
+        passed.append(case("`$suffix` се разписва по switch-а",
+                           sorted(got or []) == [
+                               "https://example.com/terms.bg.html",
+                               "https://example.com/terms.html",
+                               "https://example.com/terms.pt.html"],
+                           str(got)))
+        passed.append(case("адрес без интерполация минава непокътнат",
+                           store_gate._url_variants("https://example.com/a.html", "") ==
+                           ["https://example.com/a.html"], ""))
+        passed.append(case("неразписуема променлива дава None, не грешен адрес",
+                           store_gate._url_variants("https://example.com/$x.html", "") is None, ""))
+
     print(f"\n{sum(passed)}/{len(passed)} минаха")
     return 0 if all(passed) else 1
 

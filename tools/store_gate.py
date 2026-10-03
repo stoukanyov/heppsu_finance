@@ -46,6 +46,39 @@ def ask(what, detail=""):
     rows.append(("ASK", what, detail))
 
 
+def _url_variants(url: str, dart: str) -> list[str] | None:
+    """Адресите, които този низ може да стане наистина.
+
+    Dart низовете носят интерполация: `beagle-owner-terms$suffix.html`. Докато
+    гейтът ги отваряше буквално, със `$suffix` вътре, той връщаше 404 и го
+    показваше като червен ред — за адрес, който на живо е съвсем здрав
+    (03.10.2026). Фалшивото червено е по-скъпо от липсващата проверка: то учи
+    човека да подминава червените редове.
+
+    Променливата се разписва от дефиницията ѝ в същия код, когато тя е
+    `switch` с низови отговори — точно случаят на `suffix` (.bg, .pt, „").
+    Не може ли да се разпише, функцията връща None и редът става ASK.
+    """
+    if "$" not in url:
+        return [url]
+    m = re.search(r"\$\{?(\w+)\}?", url)
+    if not m:
+        return None
+    block = re.search(rf"\b{m.group(1)}\s*=\s*switch\s*\([^)]*\)\s*\{{(.*?)\}};", dart, re.S)
+    if not block:
+        return None
+    arms = set(re.findall(r"=>\s*'([^']*)'", block.group(1)))
+    if not arms:
+        return None
+    out: list[str] = []
+    for arm in arms:
+        deeper = _url_variants(url[: m.start()] + arm + url[m.end():], dart)
+        if deeper is None:
+            return None
+        out.extend(deeper)
+    return out
+
+
 def arb_dirs(repo: Path) -> list[str]:
     """Къде са ARB файловете: l10n.yaml казва, не предположението.
 
@@ -225,13 +258,24 @@ def check_links(repo: Path, online: bool) -> None:
         ok("покупки", "еднократни (non-consumable) — правилото за отказване на абонамент не важи")
     if online:
         for u in sorted(urls):
+            if not u.startswith("http"):
+                # `/legal/privacy/${_language(context)}` се сглобява с базата от
+                # --dart-define и в production сочи към нашия бекенд. Като низ не
+                # е адрес; curl връщаше 0 и гейтът го обявяваше за счупен.
+                ask(f"адресът се сглобява в кода: {u}", "относителен път — проверява се срещу живия бекенд, не оттук")
+                continue
+            variants = _url_variants(u, dart)
+            if variants is None:
+                ask(f"адресът се сглобява в кода: {u}", "не можах да разпиша променливата — провери го ръчно")
+                continue
             # curl, не urllib: python на тази машина няма CA пакет и пада с
             # CERTIFICATE_VERIFY_FAILED (виж reference-control-center-backlog).
             import subprocess
-            code = subprocess.run(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", u],
-                                  capture_output=True, text=True).stdout.strip()
-            code = int(code) if code.isdigit() else code
-            (ok if code == 200 else no)(f"отваря се {u}", str(code))
+            for v in sorted(variants):
+                code = subprocess.run(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", v],
+                                      capture_output=True, text=True).stdout.strip()
+                code = int(code) if code.isdigit() else code
+                (ok if code == 200 else no)(f"отваря се {v}", str(code))
 
 
 def check_plist(repo: Path, arbs: dict[str, dict]) -> None:
