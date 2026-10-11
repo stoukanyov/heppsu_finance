@@ -258,6 +258,12 @@
     border-radius:0 3px 3px 0; background:var(--brand-primary); }
   nav a:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(91,92,255,.18); }
   .side-foot { border-top:1px solid var(--bd-subtle); padding-top:var(--sp-3); }
+  .side-report { margin-bottom:var(--sp-2); }
+  .support-result { display:flex; gap:12px; align-items:flex-start; }
+  .support-result svg { width:22px; height:22px; flex:none; margin-top:1px; }
+  .support-result.ok svg { color:var(--success); } .support-result.wait svg { color:var(--warning); }
+  /* `.field .err-txt` е display:flex и иначе надвива атрибута hidden. */
+  .field .err-txt[hidden] { display:none; }
   .userchip { display:flex; align-items:center; gap:10px; padding:6px; border-radius:var(--r-md);
     cursor:pointer; transition:background .12s; }
   .userchip:hover { background:var(--bg-hover); }
@@ -529,6 +535,9 @@
     <div class="brand"><span class="logo" id="brand-mark"></span><span>AI Finance OS</span></div>
     <nav id="nav"></nav>
     <div class="side-foot">
+      <!-- „Съобщи проблем“: на всеки екран след вход (страничната лента е общата рамка;
+           на телефон е в менюто). Формата е в openSupportReport(). -->
+      <nav class="side-report"><a id="nav-report" href="#" title="Съобщи проблем"><span id="nav-report-ic"></span><span id="nav-report-txt">Съобщи проблем</span></a></nav>
       <div class="userchip" id="userchip" title="Профил и изход">
         <div class="avatar" id="side-avatar">?</div>
         <div class="who" style="min-width:0;">
@@ -770,7 +779,10 @@ async function api(path,{method='GET',body,form}={}){
   let data=null; try{ data=text?JSON.parse(text):null; }catch{ data=text; }
   if(!res.ok){
     if(res.status===401 && path!=='/auth/login') logout();
-    const msg=(data&&data.detail)?(Array.isArray(data.detail)?data.detail.map(d=>d.msg).join('; '):data.detail):('Грешка '+res.status); throw new Error(msg); }
+    const msg=(data&&data.detail)?(Array.isArray(data.detail)?data.detail.map(d=>d.msg).join('; '):data.detail):('Грешка '+res.status);
+    // Статусът и суровият detail вървят с грешката: формата за доклади превежда
+    // 422 по `loc`/`type` на езика на потребителя, вместо да показва текста на Pydantic.
+    const err=new Error(msg); err.status=res.status; err.detail=data&&data.detail; throw err; }
   return data;
 }
 async function blobDownload(path, filename){
@@ -1096,8 +1108,144 @@ function logout(){
 document.getElementById('top-avatar').onclick=logout;
 document.getElementById('userchip').onclick=()=>navigate('team');
 document.getElementById('btn-help').onclick=()=>toast('Документация: docs/ в хранилището');
+document.getElementById('nav-report-ic').outerHTML=ic('alert');
+document.getElementById('nav-report').onclick=(e)=>{ e.preventDefault(); closeOverlays(); openSupportReport(); };
 document.getElementById('btn-bell').onclick=()=>{ if(currentView!=='dashboard') navigate('dashboard');
   else document.getElementById('rail-toggle').click(); };
+
+/* ---------- „Съобщи проблем“ ----------
+   Докладът се записва в нашата база и се препраща като тикет към Control Center
+   (docs/SUPPORT.md). Отговорът казва дали е стигнал: `forwarded:false` значи
+   „приет, ще бъде препратен“ — тогава НЕ казваме „изпратено“.
+
+   Текстовете са по език; уебът засега е само на български (<html lang="bg">).
+   Нов език = нов ключ тук, със същите полета — и текстовете на грешките. */
+/* SUPPORT:BEGIN — без DOM; tests/test_support_web.py ги пуска в node */
+const SUPPORT_T = {
+  bg: {
+    menu:'Съобщи проблем',
+    title:'Съобщи проблем',
+    subtitle:'Дефект, инцидент или предложение — отива директно при екипа, който поддържа системата.',
+    category:'Вид', subject:'Тема', message:'Какво се случи?',
+    cat_bug:'Дефект — нещо работи грешно',
+    cat_incident:'Инцидент — нещо не работи сега',
+    cat_recommendation:'Предложение за подобрение',
+    subject_ph:'Кратко, напр. „ДДС дневникът не се отваря“',
+    message_ph:'Какво направи, какво очакваше и какво стана вместо това.',
+    context_hint:'Към доклада се добавят екранът, от който пишеш, и имейлът на профила ти — за да можем да отговорим.',
+    send:'Изпрати', sending:'Изпращане…', cancel:'Откажи', close:'Затвори',
+    sent_ref:'Изпратено до поддръжката. Номер на сигнала: {ref}.',
+    sent:'Изпратено до поддръжката.',
+    queued:'Приехме доклада. Ще бъде препратен към поддръжката веднага щом връзката позволи — не е нужно да го пращаш отново.',
+    rejected:'Приехме доклада и го запазихме, но автоматичното препращане не мина. Ще бъде прегледан ръчно.',
+    err_category:'Избери вид на доклада.',
+    err_subject_short:'Темата трябва да е поне {n} знака.',
+    err_subject_long:'Темата може да е до {n} знака.',
+    err_message_empty:'Опиши какво се случи.',
+    err_message_long:'Описанието може да е до {n} знака.',
+    err_too_many:'Твърде много доклада за кратко време. Опитай отново след малко.',
+    err_failed:'Докладът НЕ е приет — провери връзката и опитай пак. Написаното е запазено във формата.',
+    err_generic:'Докладът НЕ е приет: {msg}',
+  },
+};
+const SUPPORT_LIMITS = {subject_min:3, subject_max:200, message_max:3500, page_max:200};
+function supportT(lang){ return SUPPORT_T[lang] || SUPPORT_T.bg; }
+function supportFmt(s, vars){ return String(s).replace(/\{(\w+)\}/g,(m,k)=>vars&&vars[k]!==undefined?String(vars[k]):m); }
+
+/** Проверката преди изпращане — същите граници като сървъра (schemas.py). */
+function supportValidate(v, t){
+  const errs={};
+  const subject=(v.subject||'').trim(), message=(v.message||'').trim();
+  if(!['bug','incident','recommendation'].includes(v.category)) errs.category=t.err_category;
+  if(subject.length<SUPPORT_LIMITS.subject_min) errs.subject=supportFmt(t.err_subject_short,{n:SUPPORT_LIMITS.subject_min});
+  else if(subject.length>SUPPORT_LIMITS.subject_max) errs.subject=supportFmt(t.err_subject_long,{n:SUPPORT_LIMITS.subject_max});
+  if(!message) errs.message=t.err_message_empty;
+  else if(message.length>SUPPORT_LIMITS.message_max) errs.message=supportFmt(t.err_message_long,{n:SUPPORT_LIMITS.message_max});
+  return errs;
+}
+
+/** 4xx/мрежа → {field: текст} и/или {_form: текст}, на езика на потребителя.
+    Превежда се по `loc` и `type` (Pydantic), не по английското `msg`. */
+function supportErrors(err, t){
+  const status=err&&err.status;
+  if(status===422 && Array.isArray(err.detail)){
+    const out={};
+    for(const d of err.detail){
+      const field=(d.loc||[])[d.loc.length-1], type=d.type||'', ctx=d.ctx||{};
+      if(field==='category') out.category=t.err_category;
+      else if(field==='subject') out.subject=type==='string_too_long'
+        ? supportFmt(t.err_subject_long,{n:ctx.max_length||SUPPORT_LIMITS.subject_max})
+        : supportFmt(t.err_subject_short,{n:ctx.min_length||SUPPORT_LIMITS.subject_min});
+      else if(field==='message') out.message=type==='string_too_long'
+        ? supportFmt(t.err_message_long,{n:ctx.max_length||SUPPORT_LIMITS.message_max})
+        : t.err_message_empty;
+      else out._form=supportFmt(t.err_generic,{msg:d.msg||type});
+    }
+    return Object.keys(out).length?out:{_form:t.err_failed};
+  }
+  if(status===429) return {_form:t.err_too_many};
+  if(!status) return {_form:t.err_failed};                 // мрежа: заявката не е стигнала
+  const detail=err&&typeof err.detail==='string'?err.detail:'';
+  return {_form:detail?supportFmt(t.err_generic,{msg:detail}):t.err_failed};
+}
+
+/** Какво казваме след 201. „Изпратено“ — САМО при forwarded:true. */
+function supportResult(resp, t){
+  if(resp&&resp.forwarded) return {kind:'ok', text:resp.reference?supportFmt(t.sent_ref,{ref:resp.reference}):t.sent};
+  if(resp&&resp.status==='rejected') return {kind:'wait', text:t.rejected};
+  return {kind:'wait', text:t.queued};
+}
+/* SUPPORT:END */
+
+function openSupportReport(){
+  const t=supportT(document.documentElement.lang);
+  const bd=openModal({
+    title:t.title, subtitle:t.subtitle, size:'sm',
+    body:`<div id="sr-form">
+      <div class="field"><label for="sr-cat">${esc(t.category)}</label>
+        <select id="sr-cat">
+          <option value="bug">${esc(t.cat_bug)}</option>
+          <option value="incident">${esc(t.cat_incident)}</option>
+          <option value="recommendation">${esc(t.cat_recommendation)}</option>
+        </select><div class="err-txt" data-err="category" hidden></div></div>
+      <div class="field"><label for="sr-subj">${esc(t.subject)}</label>
+        <input id="sr-subj" maxlength="${SUPPORT_LIMITS.subject_max}" placeholder="${esc(t.subject_ph)}" />
+        <div class="err-txt" data-err="subject" hidden></div></div>
+      <div class="field"><label for="sr-msg">${esc(t.message)}</label>
+        <textarea id="sr-msg" rows="6" maxlength="${SUPPORT_LIMITS.message_max}" placeholder="${esc(t.message_ph)}"></textarea>
+        <div class="err-txt" data-err="message" hidden></div></div>
+      <div class="hint">${esc(t.context_hint)}</div>
+      <div class="field" style="margin:12px 0 0;"><div class="err-txt" data-err="_form" role="alert" hidden></div></div>
+    </div>`,
+    footer:`<button data-close-btn>${esc(t.cancel)}</button><button class="primary" id="sr-send">${esc(t.send)}</button>`,
+  });
+  bd.querySelector('[data-close-btn]').onclick=closeModal;
+  const showErrors=(errs)=>{
+    bd.querySelectorAll('[data-err]').forEach(n=>{
+      const msg=errs[n.dataset.err]; n.hidden=!msg; n.textContent=msg||''; });
+  };
+  const send=bd.querySelector('#sr-send');
+  send.onclick=async()=>{
+    const v={category:bd.querySelector('#sr-cat').value, subject:bd.querySelector('#sr-subj').value,
+      message:bd.querySelector('#sr-msg').value};
+    const errs=supportValidate(v,t); showErrors(errs);
+    if(Object.keys(errs).length) return;
+    send.disabled=true; send.textContent=t.sending;
+    try{
+      const resp=await api('/support/report',{method:'POST',body:{
+        category:v.category, subject:v.subject.trim(), message:v.message.trim(),
+        page:String(currentView||'').slice(0,SUPPORT_LIMITS.page_max)||null}});
+      const r=supportResult(resp,t);
+      bd.querySelector('.modal-b').innerHTML=`<div class="support-result ${r.kind}" role="status">${ic(r.kind==='ok'?'check':'clock')}<div>${esc(r.text)}</div></div>`;
+      bd.querySelector('.modal-f').innerHTML=`<button class="primary" data-close-btn>${esc(t.close)}</button>`;
+      bd.querySelector('[data-close-btn]').onclick=closeModal;
+    }catch(e){
+      // Написаното остава във формата — нищо не е изпратено, нищо не се губи.
+      showErrors(supportErrors(e,t));
+      send.disabled=false; send.textContent=t.send;
+    }
+  };
+}
 
 async function loadCompanies(){
   companies=await api('/companies'); const sel=document.getElementById('company-select');

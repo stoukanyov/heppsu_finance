@@ -332,6 +332,10 @@ exit 0
 CURL_STUB = """#!/usr/bin/env python3
 import sys
 adres = next((a for a in sys.argv[1:] if a.startswith("http")), "")
+# DoD т. 1 пита дали докладването е НАСТРОЕНО на preprod (infra/dod.yml).
+if adres.endswith("/api/v1/support/config"):
+    print('{"configured":true}')
+    sys.exit(0)
 if adres.endswith("/openapi.json"):
     print('{"paths":{"/api/v1/support/report":{}}}')
 print("ok")

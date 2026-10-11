@@ -1,4 +1,7 @@
 """FastAPI входна точка за AI Finance OS backend."""
+import asyncio
+import contextlib
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -15,11 +18,35 @@ from app.db.base import Base
 _WEB_DIR = Path(__file__).parent / "web"
 
 
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Фоновите задачи на процеса: засега само опашката с доклади към Control Center.
+
+    Цикълът тръгва винаги (освен ако е изключен с SUPPORT_FORWARDER_ENABLED) и
+    сам проверява на всеки оборот дали препращането е настроено — така токен,
+    добавен в средата, не иска нищо повече от рестарта, който и без това го чете.
+    """
+    stop = asyncio.Event()
+    task = None
+    if settings.SUPPORT_FORWARDER_ENABLED:
+        from app.modules.support.forwarder import run_forwarder_loop
+
+        task = asyncio.create_task(run_forwarder_loop(stop))
+    try:
+        yield
+    finally:
+        stop.set()
+        if task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.PROJECT_NAME,
         version="0.1.0",
         description="AI-базирана финансова операционна система за управление на компании.",
+        lifespan=_lifespan,
     )
 
     app.add_middleware(
@@ -90,6 +117,7 @@ def _register_routers(app: FastAPI) -> None:
     from app.modules.reports.router import router as reports_router
     from app.modules.stores.router import router as stores_router
     from app.modules.submissions.router import router as submissions_router
+    from app.modules.support.router import router as support_router
     from app.modules.vat.router import router as vat_router
     from app.modules.vat_refund.router import router as vat_refund_router
 
@@ -120,6 +148,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(payroll_router, prefix=prefix)
     app.include_router(firm_router, prefix=prefix)
     app.include_router(onboarding_router, prefix=prefix)
+    app.include_router(support_router, prefix=prefix)
 
 
 app = create_app()

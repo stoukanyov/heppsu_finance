@@ -30,6 +30,11 @@ os.environ["AI_PROVIDER"] = "stub"  # детерминиран AI, без мре
 # Тестовете логват многократно от един и същ „IP“ — ограничението се включва
 # точково само в тестовете, които го проверяват (виж tests/test_rate_limit.py).
 os.environ["RATE_LIMIT_ENABLED"] = "false"
+# Фоновият цикъл на докладите не върви в тестовете: те викат `forward_due`
+# директно и с подменен транспорт — навън не излиза нищо (tests/test_support.py).
+os.environ["SUPPORT_FORWARDER_ENABLED"] = "false"
+os.environ["COCKPIT_URL"] = ""
+os.environ["COCKPIT_APP_TOKEN"] = ""
 
 
 @pytest.fixture(scope="session", autouse=True)

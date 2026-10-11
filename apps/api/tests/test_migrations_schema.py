@@ -81,7 +81,7 @@ def test_timestamp_columns_have_a_default(migrated_db, column):
     )
 
 
-@pytest.mark.parametrize("table", ["crash_reports", "deadline_filings"])
+@pytest.mark.parametrize("table", ["crash_reports", "deadline_filings", "support_reports"])
 def test_insert_without_timestamps_succeeds(migrated_db, table):
     """Директното възпроизвеждане на дефекта, който мина покрай тестовете.
 

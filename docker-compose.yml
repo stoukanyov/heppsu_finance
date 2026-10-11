@@ -36,6 +36,9 @@ services:
       # RATE_LIMIT_TRUST_PROXY_HEADER: "true"
       # AI: подай реалния ключ през средата, за да активираш Claude.
       # ANTHROPIC_API_KEY: "sk-ant-..."
+      # Докладване → Control Center (docs/SUPPORT.md). Празни = не се препраща.
+      COCKPIT_URL: ${COCKPIT_URL:-}
+      COCKPIT_APP_TOKEN: ${COCKPIT_APP_TOKEN:-}
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
