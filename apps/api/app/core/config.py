@@ -155,6 +155,43 @@ class Settings(BaseSettings):
     CRASH_REPORT_RATE_LIMIT: int = 20            # доклада...
     CRASH_REPORT_RATE_WINDOW_SECONDS: int = 3600  # ...на час от един IP
 
+    # ---- Докладване от потребителя → Control Center (модул support) ----
+    # Докладът винаги се записва в нашата база; препращането към Control Center
+    # става само когато и двете стойности са попълнени. Празни (по подразбиране)
+    # → `GET /support/config` казва `configured: false`, нищо не се праща навън,
+    # докладите чакат в базата и тръгват, щом настройката се появи.
+    # Пример: COCKPIT_URL=https://cockpit.heppsu.com (без /api/tickets — пътят е в кода).
+    COCKPIT_URL: str = ""
+    # Токенът на системата `aifos` / `aifos-preprod` в Control Center (`X-App-Token`).
+    # Само от средата; не се логва и не се връща в отговор.
+    COCKPIT_APP_TOKEN: str = ""
+    # Фоновият цикъл, който препраща чакащите доклади. Изключва се в тестовете.
+    SUPPORT_FORWARDER_ENABLED: bool = True
+    SUPPORT_FORWARD_INTERVAL_SECONDS: int = 60
+    SUPPORT_FORWARD_TIMEOUT_SECONDS: float = 10.0
+    # Таван на изчакването между опитите (експоненциално: 1, 2, 4… минути до тук).
+    SUPPORT_FORWARD_MAX_BACKOFF_SECONDS: int = 3600
+    # Доклади от един потребител (и адрес) за прозореца. Същото като тавана на
+    # Control Center на подател за час (`ticket_ip_hourly_limit` = 5): над него
+    # тикетът и без това би чакал в опашката — по-честно е да кажем 429 веднага.
+    SUPPORT_REPORT_RATE_LIMIT: int = 5
+    SUPPORT_REPORT_RATE_WINDOW_SECONDS: int = 3600
+
+    @property
+    def support_forwarding_configured(self) -> bool:
+        """Може ли да се препраща: адрес И токен, адресът по HTTPS извън локалната среда.
+
+        Токенът по чист HTTP през интернет е токен на всеки по пътя — затова в
+        production/staging адрес `http://` се смята за НЕнастроен, а не за
+        „настроен, но опасен“.
+        """
+        url = self.COCKPIT_URL.strip()
+        if not url or not self.COCKPIT_APP_TOKEN.strip():
+            return False
+        if url.startswith("https://"):
+            return True
+        return url.startswith("http://") and not self.is_production
+
     # Съхранение на документи
     DOCUMENT_STORAGE_DIR: str = "./storage/documents"
     MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024  # 25 MB

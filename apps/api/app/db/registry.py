@@ -25,5 +25,6 @@ from app.modules.rbac import models as rbac_models  # noqa: F401
 from app.modules.security import models as security_models  # noqa: F401
 from app.modules.stores import models as stores_models  # noqa: F401
 from app.modules.submissions import models as submissions_models  # noqa: F401
+from app.modules.support import models as support_models  # noqa: F401
 from app.modules.vat import models as vat_models  # noqa: F401
 from app.modules.vat_refund import models as vat_refund_models  # noqa: F401
