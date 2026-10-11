@@ -58,6 +58,15 @@ API: http://127.0.0.1:8000 · Swagger: http://127.0.0.1:8000/docs
 (`AUTO_CREATE_TABLES=true`). За PostgreSQL задай `DATABASE_URL` и изключи авто-създаването
 (миграциите се управляват с Alembic).
 
+## Съобщи проблем (докладване → Control Center)
+
+Във вградения UI, в страничната лента на всеки екран: дефект, инцидент или
+предложение. `POST /api/v1/support/report` записва доклада в базата и го
+препраща като тикет към Control Center — опашка с повторение, не един опит.
+`GET /api/v1/support/config` (без вход) казва дали препращането е настроено
+(`COCKPIT_URL` + `COCKPIT_APP_TOKEN`); Definition of Done го иска `true` на
+preprod преди production. Подробно: [docs/SUPPORT.md](docs/SUPPORT.md).
+
 ## Миграции (Alembic)
 
 Схемата в production се управлява с Alembic (не с авто-създаване):

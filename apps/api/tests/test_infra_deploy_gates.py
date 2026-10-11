@@ -22,13 +22,19 @@ DEPLOY_SH = Path(__file__).resolve().parents[3] / "infra" / "deploy.sh"
 SSH_STUB = "#!/bin/sh\ncat >/dev/null 2>&1 || true\nexit 0\n"
 
 # `curl` подставен, но НЕ отговаря еднакво на всичко: DoD проверката пита
-# `openapi.json` на preprod. Стъб, който казва „ок" на всеки адрес, би направил
-# проверката за функцията за докладване безсмислена — тоест би скрил точно
-# повредата, която тя трябва да хване.
+# `/api/v1/support/config` (и при слабото ниво `openapi.json`) на preprod. Стъб,
+# който казва „ок" на всеки адрес, би направил проверката за функцията за
+# докладване безсмислена — тоест би скрил точно повредата, която тя трябва да хване.
 CURL_STUB = r"""#!/usr/bin/env python3
 import os, sys
 
 adres = next((a for a in sys.argv[1:] if a.startswith("http")), "")
+if adres.endswith("/api/v1/support/config"):
+    otgovor = os.environ.get("FAKE_CONFIG", '{"configured":true}')
+    if otgovor == "NEDOSTAPNO":
+        sys.exit(7)          # curl: Failed to connect
+    print(otgovor)
+    sys.exit(0)
 if adres.endswith("/openapi.json"):
     marshruti = os.environ.get("FAKE_MARSHRUTI", "/api/v1/support/report").split()
     print('{"paths":{' + ",".join(f'"{m}":{{}}' for m in marshruti) + '}}')
@@ -177,12 +183,19 @@ def test_bez_etiketi_ot_security_i_legal_production_ne_trugva(repo):
     assert "Legal Officer" in result.stderr
 
 
-def test_lipsvashta_funkciya_za_dokladvane_spira_production(repo):
-    """Тази система носи счетоводни данни на клиенти и НЯМА функция за докладване.
+@pytest.mark.parametrize(
+    "otgovor",
+    [
+        '{"configured":false}',     # функцията е в кода, но токенът липсва в средата
+        "NEDOSTAPNO",               # preprod не отговаря — не е доказателство за нищо
+        "ok",                       # чужд отговор (напр. страница по подразбиране)
+    ],
+)
+def test_nenastroeno_dokladvane_spira_production(repo, otgovor):
+    """DoD т. 1 мери НАСТРОЕНО, не „в кода“: `GET /api/v1/support/config` на preprod.
 
-    Проверено на 24.08.2026 по `openapi.json` на preprod: само счетоводни отчети
-    и автоматични сривове от мобилния клиент. Нито едното не е докладване от
-    човек.
+    На macOS (BSD sed) старият израз за `ochakva` даваше празен низ и
+    `grep -q ""` пускаше и `{"configured":false}` — този тест не минаваше там.
     """
     work, env, second = repo
     mark_tested(repo, second)
@@ -190,14 +203,36 @@ def test_lipsvashta_funkciya_za_dokladvane_spira_production(repo):
 
     result = subprocess.run(
         ["bash", "infra/deploy.sh", "prod", "main", second],
-        cwd=work,
-        env={**env, "FAKE_MARSHRUTI": "/api/v1/reports/kpis /api/v1/mobile/crash-reports"},
+        cwd=work, env={**env, "FAKE_CONFIG": otgovor},
         capture_output=True, text=True,
     )
 
     assert result.returncode == 1
-    assert "докладване" in result.stderr
-    assert "няма /api/v1/support/report" in result.stderr
+    assert "НЕ отговаря на Definition of Done" in result.stderr
+    assert '/api/v1/support/config не върна "configured":true' in result.stderr
+
+
+def test_dod_yml_se_chete_tochno_ot_deploy_sh():
+    """Редовете на `deploy.sh`, които четат `dod.yml`, пуснати върху истинския файл.
+
+    Изразите се вадят от самия скрипт, не се преписват — иначе тестът проверява
+    копие, а не това, което върви. Пускат се със `sed` на машината: на macOS това
+    е BSD sed, в CI — GNU; и двата трябва да прочетат едно и също.
+    """
+    redove = [
+        line.strip()
+        for line in DEPLOY_SH.read_text().splitlines()
+        if line.strip().startswith(("MARSHRUT=", "CONFIG_URL=", "OCHAKVA="))
+    ]
+    assert len(redove) == 3, redove
+    skript = "\n".join(
+        ['DOD="$1"', *redove, 'printf "%s\\n%s\\n%s\\n" "$MARSHRUT" "$CONFIG_URL" "$OCHAKVA"']
+    )
+    out = subprocess.run(
+        ["bash", "-c", skript, "dod", str(DEPLOY_SH.parent / "dod.yml")],
+        capture_output=True, text=True, check=True,
+    ).stdout.splitlines()
+    assert out == ["/api/v1/support/report", "/api/v1/support/config", '"configured":true']
 
 
 def test_propuskaneto_e_shumno_i_iska_tochniya_komit(repo):

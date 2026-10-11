@@ -180,7 +180,12 @@ if [ "$ENV_NAME" = "prod" ]; then
         #    който се промотира.
         MARSHRUT="$(sed -n 's/^  marshrut: *//p' "$DOD" | head -1)"
         CONFIG_URL="$(sed -n 's/^  config_url: *//p' "$DOD" | head -1)"
-        OCHAKVA="$(sed -n "s/^  ochakva: *'\?//p" "$DOD" | head -1 | sed "s/'[[:space:]]*\$//")"
+        # Без `\?`: това е GNU разширение — BSD sed на macOS го чете като буквален
+        # „?“, OCHAKVA остава празно и `grep -q ""` пуска и `"configured":false`.
+        # Кавичките се махат с два отделни израза, които и двата sed разбират.
+        OCHAKVA="$(sed -n 's/^  ochakva: *//p' "$DOD" | head -1 | sed "s/^'//; s/'[[:space:]]*\$//")"
+        [ -n "$CONFIG_URL" ] && [ -z "$OCHAKVA" ] \
+            && die "infra/dod.yml: config_url без ochakva — нямам срещу какво да проверя"
         TEST_URL="${AIFOS_PREPROD_URL:-http://169.58.90.87:8080}"
 
         if [ -n "$CONFIG_URL" ]; then
@@ -303,7 +308,7 @@ else
         echo "AIFOS_WORKERS=${WORKERS}"
     } >> .env
     chmod 600 .env
-    echo "  ВАЖНО: ANTHROPIC_API_KEY и CORS_ORIGINS остават за попълване на ръка"
+    echo "  ВАЖНО: ANTHROPIC_API_KEY, CORS_ORIGINS, COCKPIT_URL и COCKPIT_APP_TOKEN остават за попълване на ръка"
 fi
 REMOTE
 
