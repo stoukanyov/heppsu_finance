@@ -3,7 +3,7 @@
 
 Всеки ред тук е отказ, който вече сме получили (docs/STORE-REJECTIONS.md):
 A4 purpose strings по езици, A6/M4 цената и trial-ът, A8/M2 „Google Play"
-в iOS низ, M3 правните връзки, M1 подаването. Правило, което живее само в
+в iOS низ и имена на платформи в правните текстове, M3 правните връзки, M1 подаването. Правило, което живее само в
 документ, се нарушава дни по-късно (виж feedback-pravilo-bez-mehanizam);
 затова е скрипт, който пада.
 
@@ -30,6 +30,10 @@ AUTO_CHARGE = re.compile(
     re.I,
 )
 PLATFORM_KEY = re.compile(r"google|play|android|apple|ios|store", re.I)
+#: Имена на платформи. Apple 2.3.10 ги забранява „in your app or metadata“, а
+#: правните страници са и двете: отварят се от приложението и от описанието.
+PLATFORM_NAME = re.compile(r"\b(iOS|iPadOS|Android|iPhone|iPad|Wear OS)\b")
+STORE_NAME = re.compile(r"App Store|Google Play|Play Store")
 
 rows: list[tuple[str, str, str]] = []
 
@@ -353,6 +357,40 @@ def check_store_text(repo: Path) -> None:
         ok("описания за магазините", f"{len(files)} езика: без цени, с правна връзка")
 
 
+def legal_sources(repo: Path) -> list[Path]:
+    """Изворите на публикуваните правни страници (Политика, Условия, изтриване).
+
+    Отговорите за въпросниците на магазините и README не се публикуват.
+    """
+    found = {f for pat in ("docs/legal/**/*.md", "legal/**/*.md") for f in repo.glob(pat)}
+    return sorted(f for f in found if "answers" not in f.name and f.name != "README.md")
+
+
+def check_legal_platform_names(repo: Path) -> None:
+    """A8/M2 в правните текстове (11.10.2026).
+
+    Ред „платформата (iOS или Android)“ влезе в Политиката на Beagle Owner и
+    Ив го спря преди публикуване: Политиката е свързана от приложението и от
+    описанието в App Store — метаданни по 2.3.10. Пише се „операционната
+    система на устройството“, без имена.
+
+    Магазин по име е ASK, не NO: Условията казват как се спира абонаментът,
+    а това по 3.1.2 е задължително; всяко такова място се гледа от човек.
+    """
+    files = legal_sources(repo)
+    if not files:
+        return
+    platform = [f"{f.name}: {', '.join(sorted(set(PLATFORM_NAME.findall(f.read_text(encoding='utf-8')))))}"
+                for f in files if PLATFORM_NAME.search(f.read_text(encoding="utf-8"))]
+    (no if platform else ok)("име на платформа в правните текстове (2.3.10)",
+                             "; ".join(platform[:6]) or f"{len(files)} файла, без iOS/Android/iPhone")
+    stores = [f.name for f in files if STORE_NAME.search(f.read_text(encoding="utf-8"))]
+    if stores:
+        ask("магазин по име в правните текстове",
+            f"{', '.join(stores[:6])}{' …' if len(stores) > 6 else ''} — само там, където казваш как се "
+            "спира абонаментът (3.1.2); никъде другаде")
+
+
 #: `version: 1.2.8+81` в pubspec.yaml.
 _VERSION_LINE = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)\s*$", re.MULTILINE)
 
@@ -462,6 +500,7 @@ def main() -> int:
     check_links(repo, online)
     check_plist(repo, arbs)
     check_store_text(repo)
+    check_legal_platform_names(repo)
     check_notes(repo)
     for state, what, detail in rows:
         print(f"{state}\t{what}\t{detail}")

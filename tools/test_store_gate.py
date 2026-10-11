@@ -212,6 +212,31 @@ def main() -> int:
         passed.append(case("неразписуема променлива дава None, не грешен адрес",
                            store_gate._url_variants("https://example.com/$x.html", "") is None, ""))
 
+        # 9. Име на платформа в правните текстове е NO (2.3.10), 11.10.2026:
+        #    „iOS или Android“ в Политиката на Beagle Owner, спряно от Ив.
+        repo = build_repo(Path(tmp) / "legal", arb_dir="lib/l10n", l10n_yaml=False, dart=LEGAL_DART)
+        (repo / "docs/legal").mkdir(parents=True)
+        (repo / "docs/legal/privacy.en.md").write_text(
+            "| the platform the account was created from (iOS or Android) | stats |\n", encoding="utf-8")
+        (repo / "docs/legal/app-store-privacy-answers.md").write_text("iOS Android", encoding="utf-8")
+        store_gate.rows.clear()
+        store_gate.check_legal_platform_names(repo)
+        r = {what: (state, detail) for state, what, detail in store_gate.rows}
+        row = r.get("име на платформа в правните текстове (2.3.10)", ("", ""))
+        passed.append(case("„iOS или Android“ в Политиката пада", row[0] == "NO" and "privacy.en.md" in row[1], str(r)))
+        passed.append(case("въпросниците за магазините не се броят", "answers" not in row[1], row[1]))
+
+        (repo / "docs/legal/privacy.en.md").write_text(
+            "| the operating system of the device the account was created from | stats |\n"
+            "Cancel in the App Store or Google Play.\n", encoding="utf-8")
+        store_gate.rows.clear()
+        store_gate.check_legal_platform_names(repo)
+        r = {what: (state, detail) for state, what, detail in store_gate.rows}
+        passed.append(case("без имена на платформи минава",
+                           r.get("име на платформа в правните текстове (2.3.10)", ("", ""))[0] == "OK", str(r)))
+        passed.append(case("магазин по име е ASK, не NO",
+                           r.get("магазин по име в правните текстове", ("", ""))[0] == "ASK", str(r)))
+
     print(f"\n{sum(passed)}/{len(passed)} минаха")
     return 0 if all(passed) else 1
 
