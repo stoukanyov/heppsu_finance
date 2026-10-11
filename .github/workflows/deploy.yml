@@ -154,11 +154,10 @@ jobs:
       - name: Деплой към production
         run: ./infra/deploy.sh prod ${{ inputs.ref || github.ref_name }}
 
+      # През името и TLS, отвън — както клиентите. `http://127.0.0.1:80` на Phobos
+      # вече не стига до приложението: nginx затваря всичко без наше име (444).
       - name: Smoke тестове (само четящи)
-        run: |
-          ssh phobos-deploy 'mkdir -p /tmp/ci'
-          scp infra/ci/smoke.py phobos-deploy:/tmp/ci/smoke.py
-          ssh phobos-deploy 'python3 /tmp/ci/smoke.py http://127.0.0.1:80 --read-only'
+        run: python3 infra/ci/smoke.py https://app.heppsu.com --read-only
 
       - name: Домейнът отговаря
         run: |

@@ -417,12 +417,20 @@ REMOTE
 
 # ─────────────────────────── 5. Health gate + връщане назад ───────────────────
 log "Проверявам здравето"
-PORT="$HTTP_PORT"
+# Production: през името и TLS, както клиентите, но към 127.0.0.1 (--resolve),
+# за да не зависи от DNS. Голият IP там вече НЕ стига до приложението — nginx
+# затваря връзката (444) за всичко без наше име, а старата проверка
+# `http://127.0.0.1:80/...` би обявила всеки деплой за провален и би върнала
+# предишната версия. Preprod и demo нямат име и сертификат — там остава IP:порт.
+case "$ENV_NAME" in
+    prod) HEALTH="--resolve app.heppsu.com:${HTTPS_PORT}:127.0.0.1 https://app.heppsu.com" ;;
+    *)    HEALTH="http://127.0.0.1:${HTTP_PORT}" ;;
+esac
 HEALTHY=0
 for i in $(seq 1 20); do
-    if ssh "$HOST" "curl -fsS --max-time 5 http://127.0.0.1:${PORT}/api/v1/health" 2>/dev/null; then
+    if ssh "$HOST" "curl -fsS --max-time 5 ${HEALTH}/api/v1/health" 2>/dev/null; then
         echo
-        ssh "$HOST" "curl -fsS --max-time 5 http://127.0.0.1:${PORT}/api/v1/health/db" 2>/dev/null && echo
+        ssh "$HOST" "curl -fsS --max-time 5 ${HEALTH}/api/v1/health/db" 2>/dev/null && echo
         HEALTHY=1
         break
     fi
