@@ -180,6 +180,26 @@ def test_obshtiyat_aifos_conf_ne_zavzema_default_server(aifos_tree):
             assert "default_server" not in lst.split(), lst
 
 
+def test_imeto_na_obshtiya_blok_ne_se_svpada_s_nikoe_host(aifos_tree):
+    """Без default_server общият блок пак се избира, ако Host съвпадне с името му.
+
+    С `server_name _;` заявка `Host: _` към голия IP на production стигаше до
+    API-то по чист HTTP, покрай затварящия default_server (и nginx -t даваше
+    „conflicting server name "_"“, защото `_` стои и на затварящия сървър).
+    Името трябва да е регулярен израз, който не съвпада с нищо — на pre-prod и
+    demo блокът хваща всичко като единствен сървър на порта, не по име.
+    """
+    proba = ["_", "", "localhost", "169.58.72.254", "[::1]", "evil.example",
+             "app.heppsu.com", "aifos", "api"]
+    for s in servers(aifos_tree):
+        names = directives(s, "server_name")
+        assert names, "без server_name nginx слага \"\", което съвпада със заявки без Host"
+        for name in names[0]:
+            assert name.startswith("~"), f"{name!r} е обикновено име — клиентът може да го прати"
+            pattern = re.compile(name[1:])
+            assert not [h for h in proba if pattern.search(h)], name
+
+
 def test_bootstrap_failat_po_http_sashto_ne_proksira_po_ip():
     """Стъпка 1 (преди сертификат) също не бива да отваря API-то по IP."""
     default80 = [s for s in servers(parse_nginx(HTTP_CONF.read_text())) if is_default(s, "80")]
@@ -537,8 +557,9 @@ def test_nginx_t_minava_sas_sashtiya_obraz_i_bez_preduprezhdeniya(edge):
 
 
 @docker_only
-@pytest.mark.parametrize("host", ["169.58.72.254", "evil.example"])
+@pytest.mark.parametrize("host", ["169.58.72.254", "evil.example", "_", "localhost"])
 def test_goliyat_ip_i_chuzhdo_ime_po_http_ne_poluchavat_nishto(edge, host):
+    """`_` и `localhost` — имена, които общ блок лесно носи; никое не отваря API-то."""
     with pytest.raises((http.client.RemoteDisconnected, ConnectionResetError)):
         _http(edge["prod_ports"][0], host)
 
@@ -597,8 +618,9 @@ def test_preprod_i_demo_bez_ime_prodalzhavat_po_ip(edge):
     задача. Тази промяна не бива да ги свали: деплоят на preprod и етикетът
     tested/<sha> зависят от тях.
     """
-    status, headers, body = _http(edge["preprod_ports"][0], "169.58.90.87",
-                                  headers={"X-Forwarded-For": "6.6.6.6"})
-    assert status == 200, body
-    assert "6.6.6.6" not in body
-    assert headers["Server"] == "nginx"
+    for host in ("169.58.90.87", "_", "evil.example"):
+        status, headers, body = _http(edge["preprod_ports"][0], host,
+                                      headers={"X-Forwarded-For": "6.6.6.6"})
+        assert status == 200, (host, body)
+        assert "6.6.6.6" not in body
+        assert headers["Server"] == "nginx"

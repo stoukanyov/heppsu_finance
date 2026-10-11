@@ -93,12 +93,25 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
+    # На X-Forwarded-For се вярва САМО от частните мрежи, от които Docker раздава
+    # адреси на compose мрежите (172.16.0.0/12 и 192.168.0.0/16; prod е
+    # 172.20.0.0/16, preprod 172.18, demo 172.19 — проверено 11.10.2026). API-то
+    # не публикува порт, тоест до него стига само nginx през `backend`.
+    #
+    # Беше "*": тогава uvicorn взима НАЙ-ЛЕВИЯ адрес от X-Forwarded-For, а nginx
+    # добавяше реалния към написаното от клиента — `request.client.host` (одитният
+    # дневник на входа) се задаваше от нападателя. Сега nginx презаписва заглавката
+    # с $remote_addr, а uvicorn с изброени мрежи взима най-десния недоверен адрес.
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000",
-              "--workers", "${AIFOS_WORKERS:-4}", "--proxy-headers", "--forwarded-allow-ips", "*"]
+              "--workers", "${AIFOS_WORKERS:-4}", "--proxy-headers",
+              "--forwarded-allow-ips", "172.16.0.0/12,192.168.0.0/16"]
     networks: [backend]
 
   nginx:
-    image: nginx:1.27-alpine
+    # Заковано издание от стабилния клон, не плаващ таг: `1.27-alpine` остана на
+    # 1.27.5, след като клонът беше изоставен. Вдига се съзнателно, с `nginx -t`
+    # в CI (tests/test_infra_edge.py пуска точно този образ).
+    image: nginx:1.30.5-alpine
     restart: unless-stopped
     logging: *default-logging
     ports:

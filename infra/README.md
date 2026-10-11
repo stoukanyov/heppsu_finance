@@ -142,6 +142,9 @@ production попада некомитнат или чужд код. За produc
 5. **Бекъпва базата** и спира, ако бекъпът е празен или повреден.
 6. Строи образа, пуска миграциите, вдига стека.
 7. Health gate: при неуспех връща предишния образ и предупреждава за базата.
+   На production проверката минава през `https://app.heppsu.com` с
+   `--resolve app.heppsu.com:443:127.0.0.1` — голият IP там не стига до
+   приложението (виж „Ръбът на production“); на preprod и demo е `http://127.0.0.1:<порт>`.
 
 ## Защити срещу загуба на данни и срив
 
@@ -309,7 +312,8 @@ Center мери възрастта; над 26 часа значи пропусн
 |---|---|
 | `heppsu.com`, `www.heppsu.com` | презентационният сайт (статични файлове) |
 | `app.heppsu.com` | AI Finance OS |
-| по IP | AI Finance OS — `default_server`, за да не се чупят pre-prod, demo и мобилното приложение |
+| по IP или чуждо име, production | **нищо** — 444 на 80, отказ на TLS на 443 (`default_server` в `heppsu-tls.conf`) |
+| по IP, pre-prod и demo (Deimos) | AI Finance OS — блокът в `aifos.conf`, единственият сървър там (имена и TLS още няма) |
 
 `conf.d/aifos.conf` е общ за всички среди и нарочно **не знае за домейна**.
 Именуваните хостове и TLS се пускат само на production, като файл в
@@ -376,6 +380,35 @@ pre-prod и demo вървят непроменени.
 
 Подновяването е автоматично (certbot контейнерът проверява на 12 часа).
 
+### Ръбът на production (11.10.2026)
+
+Одит от 11.10.2026: `curl -H 'Host: evil.example' http://169.58.72.254/api/v1/health`
+връщаше 200 — API-то по чист HTTP, на голия IP и на всяко име. Правилото на Ив е
+никой порт навън без DNS+TLS. Сега:
+
+| | как |
+|---|---|
+| голият IP / чуждо Host на 80 | `return 444` — `default_server` в `heppsu-tls.conf` (и в `heppsu-http.conf`) |
+| без SNI / чуждо SNI на 443 | `ssl_reject_handshake on` — сертификатът с имената ни не се показва |
+| `aifos.conf` | **без** `default_server` (два на един порт и nginx не тръгва) и с име `~^(?!)$`, което не съвпада с никое Host — с `_` заявка `Host: _` минаваше покрай затварящия сървър; на Deimos е единственият сървър на порта и хваща IP-то |
+| Let's Encrypt | http-01 по webroot минава през именувания блок на 80 — подновяването не се пипа |
+| адресът на клиента | nginx праща `X-Forwarded-For: $remote_addr` (не `$proxy_add_x_forwarded_for`); uvicorn вярва само на `172.16.0.0/12,192.168.0.0/16` |
+| TLS | Mozilla 6.0 intermediate на ниво http в `heppsu-tls.conf`, за трите имена; без `ssl_stapling` |
+| образ | `nginx:1.30.5-alpine` заковано, `server_tokens off` в `aifos.conf` |
+
+Механизмът е `apps/api/tests/test_infra_edge.py`: структурата на файловете,
+истинският `ProxyHeadersMiddleware` на uvicorn със стойността от compose, и
+истинският nginx в Docker със **същия образ** от compose — `nginx -t` без
+предупреждения и заявки отвън (голият IP, чуждо SNI, CBC шифър, подправен
+`X-Forwarded-For`, ACME, preprod по IP). Без Docker локално се пропуска шумно; в CI
+(api.yml) липсата на Docker е грешка, не пропускане.
+
+**Ред при пускане:** първо изданието (`deploy.sh prod <таг>` — новият `aifos.conf`
+е без `default_server`, старият `nginx-extra/heppsu.conf` още няма такъв, значи
+нищо не се чупи, а IP-то още отговаря), **после** новият `heppsu-tls.conf` в
+`nginx-extra/heppsu.conf` с `nginx -t` и `reload`. Обратният ред дава два
+`default_server` на 80 и `nginx -t` отказва.
+
 След като HTTPS работи, в мобилното приложение се сменя адресът от IP на
 `https://app.heppsu.com`, връща се ATS ограничението в `Info.plist` и се
 попълват `CERT_PINS`.
@@ -417,8 +450,8 @@ pre-prod и demo вървят непроменени.
    име. Иска решение: A запис `demo.heppsu.com` → `169.58.90.87`.
 5. **Остатъци на Phobos:** `/srv/aifos/preprod` и `/srv/aifos/demo` с код от
    v1.0.1 и техните Docker volume-и след преместването върху Deimos.
-6. **`ssl_stapling` е без ефект** — сертификатите на Let's Encrypt вече нямат OCSP
-   адрес и nginx предупреждава при всяко зареждане. Редовете могат да отпаднат.
+6. ~~**`ssl_stapling` е без ефект**~~ — махнат на 11.10.2026 (виж „Ръбът на
+   production“): сертификатите на Let's Encrypt вече нямат OCSP адрес.
 
 ### Репетицията на миграциите
 
