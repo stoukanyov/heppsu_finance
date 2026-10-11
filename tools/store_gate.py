@@ -388,6 +388,9 @@ def check_legal_platform_names(repo: Path) -> None:
                 for f in files if PLATFORM_NAME.search(f.read_text(encoding="utf-8"))]
     (no if platform else ok)("име на платформа в правните текстове (2.3.10)",
                              "; ".join(platform[:6]) or f"{len(files)} файла, без iOS/Android/iPhone")
+    # A6/3.1.2(c): Условията на Beagle Owner казваха „0,99 €“ на 18 езика (12.10.2026).
+    priced = [f.name for f in files if PRICE.search(f.read_text(encoding="utf-8"))]
+    (no if priced else ok)("написана цена в правните текстове", ", ".join(priced[:6]) or "няма")
     stores = [f.name for f in files if STORE_NAME.search(f.read_text(encoding="utf-8"))]
     if stores:
         ask("магазин по име в правните текстове",

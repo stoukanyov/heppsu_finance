@@ -251,6 +251,14 @@ def main() -> int:
         passed.append(case("„iOS Keychain“ в privacy-policy пада",
                            r.get("име на платформа в правните текстове (2.3.10)", ("", ""))[0] == "NO", str(r)))
 
+        # 11. Написана цена в Условията пада (A6), 12.10.2026.
+        (repo / "docs/terms-of-use.md").write_text("Abo (derzeit **0,99 €**).", encoding="utf-8")
+        store_gate.rows.clear()
+        store_gate.check_legal_platform_names(repo)
+        r = {what: (state, detail) for state, what, detail in store_gate.rows}
+        passed.append(case("цена в Условията пада",
+                           r.get("написана цена в правните текстове", ("", ""))[0] == "NO", str(r)))
+
     print(f"\n{sum(passed)}/{len(passed)} минаха")
     return 0 if all(passed) else 1
 
