@@ -362,7 +362,11 @@ def legal_sources(repo: Path) -> list[Path]:
 
     Отговорите за въпросниците на магазините и README не се публикуват.
     """
-    found = {f for pat in ("docs/legal/**/*.md", "legal/**/*.md") for f in repo.glob(pat)}
+    # My Life Within ги държи като docs/terms-of-use*.md и docs/privacy-policy*.md
+    # (находка на сесията му, 11.10.2026) — затова по име, не само по папка.
+    patterns = ("docs/legal/**/*.md", "legal/**/*.md", "docs/**/*privacy*.md", "docs/**/*terms*.md",
+                "docs/**/*delete-account*.md")
+    found = {f for pat in patterns for f in repo.glob(pat)}
     return sorted(f for f in found if "answers" not in f.name and f.name != "README.md")
 
 

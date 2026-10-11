@@ -237,6 +237,20 @@ def main() -> int:
         passed.append(case("магазин по име е ASK, не NO",
                            r.get("магазин по име в правните текстове", ("", ""))[0] == "ASK", str(r)))
 
+        # 10. Правни текстове извън docs/legal (My Life Within: docs/privacy-policy*.md).
+        repo = build_repo(Path(tmp) / "mlw", arb_dir="lib/l10n", l10n_yaml=False, dart=LEGAL_DART)
+        (repo / "docs").mkdir()
+        (repo / "docs/privacy-policy.de.md").write_text("Schlüssel im iOS Keychain", encoding="utf-8")
+        (repo / "docs/terms-of-use.md").write_text("ok", encoding="utf-8")
+        found = [f.name for f in store_gate.legal_sources(repo)]
+        passed.append(case("docs/privacy-policy*.md и docs/terms-of-use*.md се виждат",
+                           found == ["privacy-policy.de.md", "terms-of-use.md"], str(found)))
+        store_gate.rows.clear()
+        store_gate.check_legal_platform_names(repo)
+        r = {what: (state, detail) for state, what, detail in store_gate.rows}
+        passed.append(case("„iOS Keychain“ в privacy-policy пада",
+                           r.get("име на платформа в правните текстове (2.3.10)", ("", ""))[0] == "NO", str(r)))
+
     print(f"\n{sum(passed)}/{len(passed)} минаха")
     return 0 if all(passed) else 1
 
