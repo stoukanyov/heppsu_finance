@@ -1,7 +1,7 @@
 """Оферти — регистър на предложенията към клиенти
 
 Revision ID: f2c7a94e81b3
-Revises: b9d4f1a76c53
+Revises: ffdb0650271c
 Create Date: 2026-10-26
 
 Само добавя двете таблици; нищо съществуващо не се пипа. `created_at` и
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "f2c7a94e81b3"
-down_revision: str | None = "b9d4f1a76c53"
+down_revision: str | None = "ffdb0650271c"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
