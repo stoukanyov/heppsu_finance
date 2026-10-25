@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.modules.companies.models import Company
 from app.modules.counterparties.models import Counterparty, CounterpartyType
-from app.modules.offers import markup
+from app.modules.offers import brand, markup
 from app.modules.offers.models import ZERO, Offer, OfferLine, OfferStatus
 from app.modules.offers.schemas import (
     OfferCreate,
@@ -249,6 +249,8 @@ def preview(company: Company, data: OfferPreviewRequest) -> dict:
             for index, (line, net) in enumerate(zip(data.lines, nets, strict=True), start=1)
         ],
         "has_items_marker": any(b.kind == "items" for b in blocks),
+        "has_brand_logo": brand.has_logo(company),
+        "company_name": company.name,
         "valid_until": until,
         "currency": data.currency or company.base_currency,
         "vat_rate": data.vat_rate,

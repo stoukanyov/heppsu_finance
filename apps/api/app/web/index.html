@@ -530,7 +530,8 @@
   .off-doc .off-rule { height:3px; background:#C9A961; margin:-30px -32px 22px; border-radius:8px 8px 0 0; }
   .off-doc .off-head { display:flex; justify-content:space-between; align-items:flex-start;
     border-bottom:1px solid #C9A961; padding-bottom:14px; margin-bottom:16px; }
-  .off-doc .off-brand { font-family:Georgia,'Times New Roman',serif; font-size:20px; letter-spacing:.06em; color:#7F6228; }
+  .off-doc .off-brand { font-family:Georgia,'Times New Roman',serif; font-size:17px; color:#241E1A; }
+  .off-doc .off-logo { width:74px; height:auto; display:block; }
   .off-doc .off-kicker { font-size:9px; letter-spacing:.22em; text-transform:uppercase; color:#7F6228; }
   .off-doc .off-no { font-family:Georgia,'Times New Roman',serif; font-size:22px; font-weight:700; }
   .off-doc .off-meta { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:18px; }
@@ -1856,7 +1857,8 @@ function offDocHtml(p, meta){
   const cp=meta.client||{};
   const ids=[cp.eik?'ЕИК '+cp.eik:'', cp.vat_number?'ДДС '+cp.vat_number:''].filter(Boolean).join(' · ');
   return `<div class="off-doc"><div class="off-rule"></div>
-    <div class="off-head"><div class="off-brand">HEPPSU</div>
+    <div class="off-head">${p.has_brand_logo?`<img class="off-logo" src="logo.png" alt="${esc(p.company_name||'')}"/>`
+        :`<div class="off-brand">${esc(p.company_name||'')}</div>`}
       <div style="text-align:right;"><div class="off-kicker">Оферта</div><div class="off-no">${esc(meta.number||'ОФ-····')}</div></div></div>
     <div class="off-meta">
       <div><div class="off-kicker">Дата на изготвяне</div><div class="v">${offDate(meta.issue_date)||'—'}</div></div>

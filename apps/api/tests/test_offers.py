@@ -3,7 +3,7 @@ import datetime as dt
 from decimal import Decimal
 
 from app.db import registry  # noqa: F401 — регистрира всички модели преди мапването
-from app.modules.offers import markup, models
+from app.modules.offers import brand, markup, models
 from app.modules.offers.models import Offer
 from app.modules.offers.schemas import OfferLineIn
 from app.modules.offers.service import totals, valid_until
@@ -325,6 +325,38 @@ def test_pdf_without_items_marker_still_shows_the_table(client):
     marked = client.get(f"{OFF}/{with_marker['id']}/pdf", headers=h).content
     # Двата документа носят таблицата, затова са съизмерими по размер.
     assert abs(len(plain) - len(marked)) < len(marked) * 0.3
+
+
+def test_brand_logo_only_for_its_own_company(client):
+    """Логото на ХЕПСУ не застава върху оферта на чуждо дружество.
+
+    Системата е многофирмена: кантора води офертите на клиентските дружества.
+    Чужд знак върху чужд документ е грешка, която никой няма да хване в PDF-а.
+    """
+    token = register_and_login(client, "off13@example.com")
+    auth = {"Authorization": f"Bearer {token}"}
+
+    own = client.post("/api/v1/companies", headers=auth,
+                      json={"name": "ХЕПСУ КОНСУЛТИНГ ЕООД", "eik": brand.BRAND_EIK}).json()["id"]
+    other = client.post("/api/v1/companies", headers=auth,
+                        json={"name": "Чуждо ЕООД", "eik": "111222333"}).json()["id"]
+
+    own_preview = client.post(f"{OFF}/preview", headers={**auth, "X-Company-Id": own}, json={}).json()
+    other_preview = client.post(f"{OFF}/preview", headers={**auth, "X-Company-Id": other}, json={}).json()
+    assert own_preview["has_brand_logo"] is True
+    assert other_preview["has_brand_logo"] is False
+    assert other_preview["company_name"] == "Чуждо ЕООД"
+
+    # И в PDF-а: своят документ носи вграден образ, чуждият — не.
+    def _pdf(company_id: str) -> bytes:
+        h = {**auth, "X-Company-Id": company_id}
+        customer = client.post(CP, headers=h, json={"type": "CUSTOMER", "name": "Клиент"}).json()["id"]
+        offer = client.post(OFF, headers=h, json=_payload(customer, body="текст")).json()
+        return client.get(f"{OFF}/{offer['id']}/pdf", headers=h).content
+
+    # `/ImageB` стои в ProcSet на всеки PDF с шрифт — затова се търси самият обект.
+    assert b"/Subtype /Image" in _pdf(own)
+    assert b"/Subtype /Image" not in _pdf(other)
 
 
 def test_other_company_cannot_reach_the_offer(client):

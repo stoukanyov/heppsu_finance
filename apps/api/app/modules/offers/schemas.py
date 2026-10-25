@@ -106,6 +106,10 @@ class OfferPreviewOut(BaseModel):
     blocks: list[dict]
     lines: list[PreviewLine]
     has_items_marker: bool
+    # Екранът не решава сам дали да сложи логото — питането е едно и също за
+    # прегледа и за PDF-а, иначе двете показват различен документ.
+    has_brand_logo: bool
+    company_name: str
     valid_until: dt.date | None
     currency: str
     vat_rate: Decimal

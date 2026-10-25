@@ -24,7 +24,7 @@ from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 
 from app.core.config import settings
-from app.modules.offers import markup
+from app.modules.offers import brand, markup
 from app.modules.offers.markup import Block, Run
 from app.modules.offers.models import Offer
 
@@ -43,8 +43,6 @@ CONTENT_W = PAGE_W - 2 * MARGIN
 HEADER_H = 46.0               # височината на шапката на всяка страница
 FOOTER_TOP = 276.0            # над този ред не се пише текст
 
-_ASSETS = Path(__file__).resolve().parent / "assets"
-LOGO_PATH = _ASSETS / "logo.png"
 LOGO_W = 26.0
 LOGO_H = LOGO_W * 591 / 775   # пропорцията на файла, за да не се деформира
 
@@ -146,8 +144,15 @@ class _OfferPDF(FPDF):
         self.set_fill_color(*GOLD)
         self.rect(0, 0, PAGE_W, 1.2, style="F")
 
-        if LOGO_PATH.is_file():
-            self.image(str(LOGO_PATH), x=MARGIN, y=13, w=LOGO_W)
+        logo = brand.logo_for(self.company)
+        if logo is not None:
+            self.image(str(logo), x=MARGIN, y=13, w=LOGO_W)
+        else:
+            # Чуждо дружество носи името си, не чужд знак.
+            self.set_font("serif", "B", 15)
+            self.set_text_color(*INK)
+            self.set_xy(MARGIN, 18)
+            self.cell(100, 8, self.company.name)
 
         # Дясна страна: „ОФЕРТА" с разредка и номерът със сериф.
         self._letterspaced("ОФЕРТА", x=PAGE_W - MARGIN, y=15, size=8.5,
