@@ -109,6 +109,7 @@ def _register_routers(app: FastAPI) -> None:
     from app.modules.income_report.router import router as income_report_router
     from app.modules.invoicing.router import router as invoicing_router
     from app.modules.mobile.router import router as mobile_router
+    from app.modules.offers.router import router as offers_router
     from app.modules.onboarding.router import router as onboarding_router
     from app.modules.payments.router import router as payments_router
     from app.modules.payroll.router import router as payroll_router
@@ -139,6 +140,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(assets_router, prefix=prefix)
     app.include_router(audit_router, prefix=prefix)
     app.include_router(invoicing_router, prefix=prefix)
+    app.include_router(offers_router, prefix=prefix)
     app.include_router(payments_router, prefix=prefix)
     app.include_router(purchases_router, prefix=prefix)
     app.include_router(stores_router, prefix=prefix)

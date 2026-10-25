@@ -25,6 +25,8 @@ PERMISSIONS: dict[str, list[tuple[str, str]]] = {
         ("invoices.view", "Преглед на издадени фактури"),
         ("invoices.create", "Създаване на фактури (чернови)"),
         ("invoices.issue", "Издаване и анулиране на фактури"),
+        ("offers.view", "Преглед на оферти"),
+        ("offers.manage", "Създаване, редакция и изтриване на оферти"),
         ("purchases.view", "Преглед на получени фактури"),
         ("purchases.create", "Въвеждане на покупки"),
         ("purchases.post", "Осчетоводяване на покупки"),
@@ -130,7 +132,7 @@ ROLE_TEMPLATES: list[RoleTemplate] = [
             "подготовка на пакети за НАП. Без управление на роли."
         ),
         permissions=[
-            *_only("accounting.", "vat.", "invoices.", "purchases.", "counterparties.",
+            *_only("accounting.", "vat.", "invoices.", "offers.", "purchases.", "counterparties.",
                    "banking.", "documents.", "reports.", "assets.", "submissions.", "payroll."),
             "payments.view", "payments.approve", "ai.use", "company.view", "team.view", "audit.view",
         ],
@@ -146,6 +148,7 @@ ROLE_TEMPLATES: list[RoleTemplate] = [
         permissions=[
             "accounting.view", "accounting.create_entry", "accounting.post_entry",
             "invoices.view", "invoices.create", "invoices.issue",
+            "offers.view", "offers.manage",
             "purchases.view", "purchases.create", "purchases.post",
             "counterparties.view", "counterparties.manage",
             "banking.view", "banking.import", "banking.reconcile",
@@ -162,6 +165,7 @@ ROLE_TEMPLATES: list[RoleTemplate] = [
         description="Финансов контрол: одобрява плащания, вижда всички отчети и анализи.",
         permissions=[
             "accounting.view", "invoices.view", "purchases.view", "counterparties.view",
+            "offers.view",
             "banking.view", "banking.reconcile",
             "payments.view", "payments.prepare", "payments.approve",
             "vat.view", "vat.refund_manage", "documents.view", "documents.approve",
@@ -180,7 +184,7 @@ ROLE_TEMPLATES: list[RoleTemplate] = [
         ),
         permissions=[
             *_only("accounting.", "vat.", "purchases.", "documents.", "submissions.", "payroll."),
-            "invoices.view", "counterparties.view", "counterparties.manage",
+            "invoices.view", "offers.view", "counterparties.view", "counterparties.manage",
             "banking.view", "banking.import", "banking.reconcile",
             "reports.view", "reports.export", "assets.view", "assets.manage", "company.view",
         ],
@@ -212,6 +216,7 @@ ROLE_TEMPLATES: list[RoleTemplate] = [
         description="Само за преглед: вижда всичко, не променя нищо.",
         permissions=[
             "accounting.view", "invoices.view", "purchases.view", "counterparties.view",
+            "offers.view",
             "banking.view", "payments.view", "vat.view", "documents.view",
             "reports.view", "reports.export", "audit.view", "assets.view", "company.view",
             "payroll.view",

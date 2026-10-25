@@ -509,6 +509,66 @@
     animation:din .2s ease-out; }
   .drawer.sm { width:360px; } .drawer.lg { width:640px; }
   @keyframes din { from { transform:translateX(100%); } }
+  /* ============================================================
+     Оферти — документът се оформя по сайта heppsu.com:
+     кремава хартия, златни линии, сериф за заглавията. Останалата
+     част от екрана остава в системата, затова стиловете са затворени
+     в `.off-doc` и не текат навън.
+     ============================================================ */
+  .off-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; align-items:start; }
+  @media (max-width:1100px){ .off-layout { grid-template-columns:1fr; } }
+  .off-body { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px; line-height:21px; min-height:280px; }
+  .off-tools { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+  .off-tools button { height:30px; padding:0 10px; font-size:12px; }
+  .off-legend { background:var(--bg-muted); border-radius:10px; padding:10px 12px; font-size:12px;
+    line-height:19px; color:var(--tx-secondary); margin-top:10px; }
+  .off-legend code { font-family:ui-monospace,monospace; background:var(--bg-app); padding:1px 5px;
+    border-radius:4px; color:var(--tx-primary); }
+
+  .off-doc { background:#FBF8F3; color:#241E1A; border:1px solid #E2D5B9; border-radius:8px;
+    padding:30px 32px 26px; font-size:13px; line-height:20px; }
+  .off-doc .off-rule { height:3px; background:#C9A961; margin:-30px -32px 22px; border-radius:8px 8px 0 0; }
+  .off-doc .off-head { display:flex; justify-content:space-between; align-items:flex-start;
+    border-bottom:1px solid #C9A961; padding-bottom:14px; margin-bottom:16px; }
+  .off-doc .off-brand { font-family:Georgia,'Times New Roman',serif; font-size:20px; letter-spacing:.06em; color:#7F6228; }
+  .off-doc .off-kicker { font-size:9px; letter-spacing:.22em; text-transform:uppercase; color:#7F6228; }
+  .off-doc .off-no { font-family:Georgia,'Times New Roman',serif; font-size:22px; font-weight:700; }
+  .off-doc .off-meta { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:18px; }
+  .off-doc .off-meta .v { font-family:Georgia,'Times New Roman',serif; font-size:14px; margin-top:3px; }
+  .off-doc .off-meta .framed { border:1px solid #C9A961; background:rgba(201,169,97,.12);
+    border-radius:4px; padding:6px 9px; margin:-6px -9px; }
+  .off-doc .off-to { border-left:2px solid #C9A961; padding-left:11px; margin-bottom:20px; }
+  .off-doc .off-to .nm { font-family:Georgia,'Times New Roman',serif; font-size:15px; font-weight:700; margin-top:3px; }
+  .off-doc .off-to .sub { font-size:11px; color:#7A6E63; }
+  .off-doc h1 { font-family:Georgia,'Times New Roman',serif; font-size:22px; line-height:28px; margin:0 0 7px; }
+  .off-doc h1 + .off-ul { width:46px; height:2px; background:#C9A961; margin-bottom:14px; }
+  .off-doc h2 { font-family:Georgia,'Times New Roman',serif; font-size:16px; margin:18px 0 7px;
+    padding-bottom:5px; border-bottom:1px solid #E2D5B9; }
+  .off-doc h3 { font-family:Georgia,'Times New Roman',serif; font-size:14px; margin:14px 0 5px; }
+  .off-doc p { margin:0 0 9px; }
+  .off-doc ul { list-style:none; margin:0 0 11px; padding:0; }
+  .off-doc li { position:relative; padding-left:14px; margin-bottom:5px; }
+  .off-doc li::before { content:''; position:absolute; left:0; top:8px; width:5px; height:5px;
+    border-radius:50%; background:#C9A961; }
+  .off-doc table { width:100%; border-collapse:collapse; margin:4px 0 10px; }
+  .off-doc th { font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:#7F6228;
+    font-weight:500; text-align:left; padding:0 0 5px; border-bottom:1px solid #C9A961; }
+  .off-doc td { padding:6px 0; border-bottom:1px solid #EDE3CF; font-size:12px; vertical-align:top; }
+  .off-doc th.r, .off-doc td.r { text-align:right; }
+  .off-doc .off-sums { margin-left:auto; width:62%; }
+  .off-doc .off-sums .ln { display:flex; justify-content:space-between; font-size:12px;
+    color:#7A6E63; padding:3px 0; }
+  .off-doc .off-sums .ln b { color:#241E1A; font-weight:500; }
+  .off-doc .off-total { display:flex; justify-content:space-between; align-items:baseline;
+    border:1px solid #C9A961; background:rgba(201,169,97,.12); border-radius:4px; padding:8px 11px; margin-top:6px; }
+  .off-doc .off-total .lbl { font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:#7F6228; }
+  .off-doc .off-total .amt { font-family:Georgia,'Times New Roman',serif; font-size:19px; font-weight:700; }
+  .off-doc .off-sign { text-align:right; margin-top:22px; padding-top:7px; }
+  .off-doc .off-sign .nm { font-family:Georgia,'Times New Roman',serif; font-weight:700;
+    border-top:1px solid #E2D5B9; padding-top:5px; display:inline-block; min-width:170px; }
+  .off-doc .off-sign .ro { font-size:10px; color:#7A6E63; }
+  .off-doc .off-foot { border-top:1px solid #EDE3CF; margin-top:18px; padding-top:8px;
+    font-size:9.5px; color:#7A6E63; }
 </style>
 </head>
 <body>
@@ -699,6 +759,10 @@ const ICON = {
   userPlus:'M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M8.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M19 8v6M16 11h6',
   import:'M12 3v10m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
   camera:'M4 8a2 2 0 0 1 2-2h1.5l1.2-2h6.6l1.2 2H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM12 16a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7',
+  offer:'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 12h6M9 16h4',
+  copy:'M9 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
+  edit:'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z',
+  trash:'M4 7h16M10 11v6M14 11v6M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M9 7V4h6v3',
   logo:'M12 3 4.5 8.2v7.6L12 21l7.5-5.2V8.2zM12 10.5v6M8.7 12.3l3.3-1.8 3.3 1.8'
 };
 function ic(name, cls){ return `<svg class="${cls||''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${ICON[name]||''}"/></svg>`; }
@@ -711,6 +775,7 @@ const NAV = [
     ['contacts','Контрагенти','users','counterparties.view'],
   ]},
   {sec:'Продажби и покупки', items:[
+    ['offers','Оферти','offer','offers.view'],
     ['invoices','Продажби','receipt','invoices.view'], ['purchases','Покупки','cart','purchases.view'],
     ['banking','Банки и каси','bank','bank.view'], ['payments','Плащания','card','payments.view'],
     ['stores','Магазини','apps','stores.view'],
@@ -797,12 +862,14 @@ const STAT = { // status → pill class
   ISSUED:'s-violet', PAID:'s-green', PARTIALLY_PAID:'s-blue', DRAFT:'s-gray', CANCELLED:'s-gray', OVERDUE:'s-red',
   PREPARED:'s-amber', APPROVED:'s-green', REJECTED:'s-red', POSTED:'s-green', MATCHED:'s-green', UNMATCHED:'s-gray',
   PARTIALLY_MATCHED:'s-blue', IGNORED:'s-gray', RECOGNIZED:'s-green', NEEDS_REVIEW:'s-amber', RECEIVED:'s-gray',
-  OCR_PROCESSING:'s-blue', PROPOSED:'s-violet', MOBILE:'s-violet'
+  OCR_PROCESSING:'s-blue', PROPOSED:'s-violet', MOBILE:'s-violet',
+  SENT:'s-blue', ACCEPTED:'s-green', DECLINED:'s-red', EXPIRED:'s-amber'
 };
 const STAT_BG = {DRAFT:'Чернова',ISSUED:'Издадена',PAID:'Платена',PARTIALLY_PAID:'Частично платена',CANCELLED:'Анулирана',
   PREPARED:'Подготвено',APPROVED:'Одобрено',REJECTED:'Отхвърлено',POSTED:'Осчетоводена',
   UNMATCHED:'Несъпоставено',PARTIALLY_MATCHED:'Частично',MATCHED:'Съпоставено',IGNORED:'Игнорирано',
-  RECOGNIZED:'Разпознат',NEEDS_REVIEW:'За проверка',RECEIVED:'Приет',OCR_PROCESSING:'OCR…',PROPOSED:'Предложен'};
+  RECOGNIZED:'Разпознат',NEEDS_REVIEW:'За проверка',RECEIVED:'Приет',OCR_PROCESSING:'OCR…',PROPOSED:'Предложен',
+  SENT:'Изпратена',ACCEPTED:'Приета',DECLINED:'Отказана',EXPIRED:'Изтекла'};
 const pill = (s)=>`<span class="pill ${STAT[s]||'s-gray'}">${esc(STAT_BG[s]||s)}</span>`;
 const ROLES = ['OWNER','MANAGER','CFO','CHIEF_ACCOUNTANT','ACCOUNTANT','EXTERNAL_ACCOUNTANT','AUDITOR','TAX_CONSULTANT','EMPLOYEE_SUBMITTER','EMPLOYEE_APPROVER','SYS_ADMIN','SECURITY_ADMIN','READ_ONLY'];
 const optlist = (arr,v,l)=>arr.map(x=>`<option value="${x[v]}">${esc(x[l])}</option>`).join('');
@@ -1259,7 +1326,7 @@ document.getElementById('company-select').onchange=async(e)=>{ companyId=e.targe
 
 /* ---------- router ---------- */
 let currentView='dashboard';
-const VIEWS={ dashboard:viewDashboard, accounting:viewAccounting, contacts:viewContacts, invoices:viewInvoices,
+const VIEWS={ dashboard:viewDashboard, accounting:viewAccounting, contacts:viewContacts, offers:viewOffers, invoices:viewInvoices,
   purchases:viewPurchases, banking:viewBanking, payments:viewPayments, stores:viewStores, vat:viewVat, refunds:viewRefunds, income73:viewIncome73, reports:viewReports,
   analytics:viewAnalytics, documents:viewDocuments, payroll:viewPayroll, firm:viewFirm, onboarding:viewOnboarding,
   team:viewTeam, admin:viewAdmin, audit:viewAudit };
@@ -1715,6 +1782,316 @@ async function viewInvoices(main){
   };
   main.querySelectorAll('.issue').forEach(b=>b.onclick=async()=>{ try{ await api(`/invoices/${b.dataset.id}/issue`,{method:'POST'}); toast('Издадена и осчетоводена'); viewInvoices(main); }catch(e){ toast(e.message,true); } });
   main.querySelectorAll('.pdf').forEach(b=>b.onclick=()=>blobDownload(`/invoices/${b.dataset.id}/pdf`,`фактура-${b.dataset.id}.pdf`));
+}
+
+/* ==================== ОФЕРТИ ==================== */
+/* Документът се рисува от блоковете, които връща `/offers/preview`, а не от
+   собствен парсер тук. Два парсера — JavaScript за екрана и Python за PDF-а —
+   се разминават тихо и човекът вижда едно, а клиентът получава друго. */
+let offFilter='';      // клиент, по който е филтриран регистърът
+let offEdit=null;      // отворената оферта (null = редакторът е затворен)
+let offTimer=null;     // забавяне на прегледа, за да не пита при всеки знак
+let offCustomers=[];   // клиентите на екрана — прегледът не ги тегли наново
+
+const OFF_SAMPLE = `# Заглавие на офертата
+
+Кратък увод към клиента.
+
+## Обхват на услугата
+
+* първа точка
+* втора точка
+
+## Позиции и цени
+
+[[позиции]]
+
+## Условия
+
+Плащане, срок за изпълнение, гаранция.`;
+
+/* Датите се смятат в местното време. `toISOString()` връща UTC и до 02:00 през
+   лятото дава вчерашния ден — датата на изготвяне излизаше с ден назад, а
+   валидната до не съвпадаше с изчислената от сървъра. */
+const offIso = (d)=> `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const offToday = ()=> offIso(new Date());
+const offCompany = ()=> companies.find(c=>c.id===companyId) || {};
+function offPlusDays(date, days){
+  if(!date||!days) return '';
+  const [y,m,d]=date.split('-').map(Number);
+  if(!y||!m||!d) return '';
+  return offIso(new Date(y, m-1, d+Number(days)));
+}
+const offDate = (s)=> s? s.split('-').reverse().join('.') : '';
+function offRuns(runs){ return (runs||[]).map(r=>r.bold?`<strong>${esc(r.text)}</strong>`:esc(r.text)).join(''); }
+
+/* ---------- документът (същото оформление като в PDF-а) ---------- */
+function offTableHtml(p){
+  if(!p.lines||!p.lines.length) return '';
+  const rows=p.lines.map(l=>`<tr><td style="width:22px;">${l.line_no}</td><td>${esc(l.description)}</td>
+    <td class="r">${fmt(l.quantity).replace(/,00$/,'')}${l.unit?' '+esc(l.unit):''}</td>
+    <td class="r">${fmt(l.unit_price)}</td><td class="r"><b>${fmt(l.line_net)}</b></td></tr>`).join('');
+  return `<table><thead><tr><th>№</th><th>Описание</th><th class="r">К-во</th><th class="r">Ед. цена</th><th class="r">Сума</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <div class="off-sums">
+      <div class="ln"><span>Данъчна основа</span><b>${fmt(p.subtotal)} ${esc(p.currency)}</b></div>
+      <div class="ln"><span>ДДС ${fmt(p.vat_rate).replace(/,00$/,'')}%</span><b>${fmt(p.vat_amount)} ${esc(p.currency)}</b></div>
+      <div class="off-total"><span class="lbl">Общо за плащане</span><span class="amt">${fmt(p.total)} ${esc(p.currency)}</span></div>
+    </div>`;
+}
+function offDocHtml(p, meta){
+  const table=offTableHtml(p);
+  let html=(p.blocks||[]).map(b=>{
+    if(b.kind==='items') return table;
+    if(b.kind==='h1') return `<h1>${offRuns(b.runs)}</h1><div class="off-ul"></div>`;
+    if(b.kind==='h2') return `<h2>${offRuns(b.runs)}</h2>`;
+    if(b.kind==='h3') return `<h3>${offRuns(b.runs)}</h3>`;
+    if(b.kind==='bullets') return `<ul>${b.items.map(i=>`<li>${offRuns(i)}</li>`).join('')}</ul>`;
+    return `<p>${offRuns(b.runs)}</p>`;
+  }).join('');
+  // Таблицата не изчезва само защото в текста липсва [[позиции]] — застава след него.
+  if(table && !p.has_items_marker) html+=table;
+  if(!(p.blocks||[]).some(b=>b.kind==='h1') && meta.title) html=`<h1>${esc(meta.title)}</h1><div class="off-ul"></div>`+html;
+
+  const cp=meta.client||{};
+  const ids=[cp.eik?'ЕИК '+cp.eik:'', cp.vat_number?'ДДС '+cp.vat_number:''].filter(Boolean).join(' · ');
+  return `<div class="off-doc"><div class="off-rule"></div>
+    <div class="off-head"><div class="off-brand">HEPPSU</div>
+      <div style="text-align:right;"><div class="off-kicker">Оферта</div><div class="off-no">${esc(meta.number||'ОФ-····')}</div></div></div>
+    <div class="off-meta">
+      <div><div class="off-kicker">Дата на изготвяне</div><div class="v">${offDate(meta.issue_date)||'—'}</div></div>
+      <div><div class="off-kicker">Срок на валидност</div><div class="v">${meta.validity_days?meta.validity_days+' дни':'—'}</div></div>
+      <div class="framed"><div class="off-kicker">Валидна до</div><div class="v"><b>${offDate(p.valid_until)||'—'}</b></div></div></div>
+    ${cp.name?`<div class="off-to"><div class="off-kicker">До</div><div class="nm">${esc(cp.name)}</div>
+      ${ids?`<div class="sub">${esc(ids)}</div>`:''}${cp.address?`<div class="sub">${esc(cp.address)}</div>`:''}</div>`:''}
+    ${html}
+    <div class="off-sign"><div class="nm">${esc(meta.manager||'')}</div><div class="ro">Управител</div></div>
+    <div class="off-foot">${esc(meta.footer||'')}</div></div>`;
+}
+
+/* ---------- регистър ---------- */
+async function viewOffers(main){
+  if(offEdit) return offRenderEditor(main);
+  const contacts=await api('/counterparties');
+  const customers=contacts.filter(c=>c.type==='CUSTOMER'||c.type==='BOTH');
+  const offers=await api('/offers'+(offFilter?`?counterparty_id=${offFilter}`:''));
+  main.innerHTML=pageH('Оферти','Регистър на офертите към клиенти',
+      `<button id="o-new" class="primary">${ic('plus')}Нова оферта</button>`)
+    +`<div class="card"><div class="card-t"><h3>Регистър</h3>
+        <div class="flex" style="gap:8px;align-items:center;">
+          <span class="pill s-gray na">${offers.length}</span>
+          <select id="o-filter" style="height:36px;min-width:210px;"><option value="">Всички клиенти</option>
+            ${customers.map(c=>`<option value="${c.id}" ${offFilter===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>
+        </div></div>
+      ${offers.length?`<table><thead><tr><th>№</th><th>Клиент</th><th>Заглавие</th><th>Изготвена</th><th>Валидна до</th>
+        <th class="num">Сума</th><th>Статус</th><th class="num">Действия</th></tr></thead><tbody>
+        ${offers.map(o=>`<tr><td class="strong">${esc(o.full_number)}</td><td>${esc(o.counterparty_name||'')}</td>
+          <td>${esc(o.title)}</td><td class="muted">${offDate(o.issue_date)}</td>
+          <td class="${o.is_expired?'':'muted'}">${offDate(o.valid_until)}${o.is_expired?' <span class="pill s-amber na">изтекла</span>':''}</td>
+          <td class="num">${fmt(o.total)} ${esc(o.currency)}</td><td>${pill(o.status)}</td>
+          <td class="num"><div class="flex" style="justify-content:flex-end;gap:6px;">
+            <button class="icon-btn o-copy" data-id="${o.id}" title="Копирай">${ic('copy')}</button>
+            <button class="icon-btn o-edit" data-id="${o.id}" title="Редактирай">${ic('edit')}</button>
+            <button class="icon-btn o-pdf" data-id="${o.id}" data-no="${esc(o.full_number)}" title="PDF">${ic('download')}</button>
+            <button class="icon-btn o-del" data-id="${o.id}" data-no="${esc(o.full_number)}" title="Изтрий">${ic('trash')}</button>
+          </div></td></tr>`).join('')}</tbody></table>`
+        :empty(offFilter?'Няма оферти за този клиент.':'Още няма оферти.')}</div>`;
+
+  document.getElementById('o-filter').onchange=(e)=>{ offFilter=e.target.value; viewOffers(main); };
+  document.getElementById('o-new').onclick=()=>{
+    if(!customers.length){ toast('Първо създай клиент в „Контрагенти"',true); return; }
+    offEdit=offBlank(); viewOffers(main);
+  };
+  main.querySelectorAll('.o-edit').forEach(b=>b.onclick=async()=>{
+    const o=await api('/offers/'+b.dataset.id);
+    offEdit={id:o.id, number:o.full_number, counterparty_id:o.counterparty_id, title:o.title, issue_date:o.issue_date,
+      validity_days:o.validity_days, vat_rate:o.vat_rate, body:o.body, status:o.status, source:null,
+      lines:o.lines.map(l=>({description:l.description, unit:l.unit||'', quantity:l.quantity, unit_price:l.unit_price}))};
+    viewOffers(main);
+  });
+  main.querySelectorAll('.o-copy').forEach(b=>b.onclick=async()=>{
+    // Копието носи текста и позициите; клиентът, датата и валидността се попълват наново.
+    const t=await api('/offers/'+b.dataset.id+'/copy');
+    // Клиентът, датата и валидността остават празни — попълват се наново за новия адресат.
+    offEdit={...offBlank(), issue_date:'', validity_days:'', title:t.title, body:t.body,
+      vat_rate:t.vat_rate, source:t.source_number,
+      lines:t.lines.map(l=>({description:l.description, unit:l.unit||'', quantity:l.quantity, unit_price:l.unit_price}))};
+    viewOffers(main);
+  });
+  main.querySelectorAll('.o-pdf').forEach(b=>b.onclick=()=>blobDownload(`/offers/${b.dataset.id}/pdf`,`оферта-${b.dataset.no}.pdf`));
+  main.querySelectorAll('.o-del').forEach(b=>b.onclick=()=>{
+    openModal({title:'Изтриване на оферта', subtitle:`${b.dataset.no} ще бъде изтрита безвъзвратно.`,
+      footer:`<button class="ghost" onclick="closeModal()">Отказ</button><button class="primary" id="o-del-ok">Изтрий</button>`,
+      onOpen:(bd)=>{ bd.querySelector('#o-del-ok').onclick=async()=>{
+        try{ await api('/offers/'+b.dataset.id,{method:'DELETE'}); closeModal(); toast('Изтрита'); viewOffers(main); }
+        catch(e){ toast(e.message,true); } }; }});
+  });
+}
+
+function offBlank(){
+  return {id:null, number:null, counterparty_id:'', title:'', issue_date:offToday(), validity_days:30,
+    vat_rate:'20.00', body:OFF_SAMPLE, status:'DRAFT', source:null,
+    lines:[{description:'', unit:'', quantity:'1', unit_price:'0.00'}]};
+}
+
+/* ---------- редактор ---------- */
+function offCollect(){
+  // Състоянието се чете от екрана преди всяко пререндиране, за да не се губи писаното.
+  const g=(id)=>document.getElementById(id);
+  if(!g('o-body')) return;
+  offEdit.counterparty_id=g('o-cp').value;
+  offEdit.title=g('o-title').value;
+  offEdit.issue_date=g('o-date').value;
+  offEdit.validity_days=g('o-days').value;
+  offEdit.vat_rate=g('o-vat').value;
+  offEdit.body=g('o-body').value;
+  offEdit.lines=[...document.querySelectorAll('#o-lines tr[data-i]')].map(tr=>({
+    description:tr.querySelector('.l-desc').value, unit:tr.querySelector('.l-unit').value,
+    quantity:tr.querySelector('.l-qty').value||'0', unit_price:tr.querySelector('.l-price').value||'0'}));
+}
+
+async function offRenderEditor(main){
+  offCustomers=(await api('/counterparties')).filter(c=>c.type==='CUSTOMER'||c.type==='BOTH');
+  const customers=offCustomers;
+  const e=offEdit;
+  const title=e.id?'Редакция на оферта':(e.source?`Нова оферта (копие на ${e.source})`:'Нова оферта');
+  main.innerHTML=pageH(title, e.source?'Клиентът, датата и валидността се попълват наново.':'Текстът се пише със знаци; таблицата сама си смята сумите.',
+      `<button id="o-cancel" class="ghost">Назад</button><button id="o-save" class="primary">${ic('check')}Запази</button>`)
+    +`<div class="off-layout">
+      <div class="stack">
+        <div class="card stack">
+          <div class="row"><div class="field" style="flex:2"><label>Клиент</label>
+              <select id="o-cp"><option value="">— избери —</option>${customers.map(c=>`<option value="${c.id}" ${e.counterparty_id===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></div>
+            <button id="o-newcp" class="ghost" style="align-self:flex-end;">${ic('plus')}Нов клиент</button></div>
+          <div class="row"><div class="field"><label>Дата на изготвяне</label><input id="o-date" type="date" value="${esc(e.issue_date)}"/></div>
+            <div class="field"><label>Валидност (дни)</label><input id="o-days" type="number" min="1" step="1" value="${esc(String(e.validity_days))}"/></div>
+            <div class="field"><label>Валидна до</label><input id="o-until" value="" readonly style="background:rgba(201,169,97,.12);border-color:#C9A961;"/></div>
+            <div class="field" style="max-width:110px;"><label>ДДС %</label><input id="o-vat" type="number" step="0.01" min="0" max="100" value="${esc(String(e.vat_rate))}"/></div></div>
+        </div>
+        <div class="card stack">
+          <div class="field"><label>Заглавие</label><input id="o-title" value="${esc(e.title)}" placeholder="напр. Внедряване на счетоводна система"/></div>
+          <div><label style="display:block;margin-bottom:6px;">Текст на офертата</label>
+            <div class="off-tools">
+              <button data-mark="# " title="Заглавие">H1</button><button data-mark="## " title="Подзаглавие">H2</button>
+              <button data-mark="### " title="Трето ниво">H3</button><button data-wrap="**" title="Получер"><b>B</b></button>
+              <button data-mark="* " title="Точка от списък">•</button><button data-mark="[[позиции]]" title="Тук застава таблицата">Таблица</button></div>
+            <textarea id="o-body" class="off-body" rows="16">${esc(e.body)}</textarea>
+            <div class="off-legend"><code>#</code> заглавие · <code>##</code> подзаглавие · <code>###</code> трето ниво ·
+              <code>*</code> в началото на реда прави точка · <code>**текст**</code> получер ·
+              <code>[[позиции]]</code> мястото на таблицата. Обратната наклонена черта обезсилва знака: <code>\\*</code>.</div></div>
+        </div>
+        <div class="card">
+          <div class="card-t"><h3>Позиции</h3><button id="o-addline" class="sm">${ic('plus')}Нова позиция</button></div>
+          <table><thead><tr><th>Описание</th><th style="width:70px;">Мярка</th><th style="width:90px;" class="num">К-во</th>
+            <th style="width:120px;" class="num">Ед. цена</th><th style="width:40px;"></th></tr></thead>
+            <tbody id="o-lines"></tbody></table>
+        </div>
+      </div>
+      <div id="o-preview">${loading()}</div></div>`;
+
+  const rerender=()=>{ offCollect(); viewOffers(main); };
+  document.getElementById('o-cancel').onclick=()=>{ offEdit=null; viewOffers(main); };
+  document.getElementById('o-save').onclick=()=>offSave(main);
+  document.getElementById('o-newcp').onclick=()=>offNewClient(main);
+  document.getElementById('o-addline').onclick=()=>{ offCollect(); offEdit.lines.push({description:'',unit:'',quantity:'1',unit_price:'0.00'}); viewOffers(main); };
+
+  // Лентата вмъква знаците в текста — полето си остава обикновен текст.
+  main.querySelectorAll('.off-tools button').forEach(b=>b.onclick=()=>{
+    const ta=document.getElementById('o-body'); const s=ta.selectionStart, en=ta.selectionEnd;
+    if(b.dataset.wrap){ const w=b.dataset.wrap;
+      ta.value=ta.value.slice(0,s)+w+(ta.value.slice(s,en)||'текст')+w+ta.value.slice(en);
+      ta.selectionStart=s+w.length; ta.selectionEnd=s+w.length+(en-s||5);
+    } else { const start=ta.value.lastIndexOf('\n',s-1)+1; const mark=b.dataset.mark;
+      ta.value=ta.value.slice(0,start)+mark+ta.value.slice(start);
+      ta.selectionStart=ta.selectionEnd=s+mark.length; }
+    ta.focus(); offPreview();
+  });
+
+  offDrawLines();
+  ['o-date','o-days'].forEach(id=>document.getElementById(id).oninput=()=>{ offUntil(); offPreview(); });
+  document.getElementById('o-vat').oninput=offPreview;
+  document.getElementById('o-title').oninput=offPreview;
+  document.getElementById('o-cp').onchange=offPreview;
+  document.getElementById('o-body').oninput=offPreview;
+  offUntil(); offPreview();
+}
+
+function offUntil(){
+  const d=document.getElementById('o-date'), n=document.getElementById('o-days'), u=document.getElementById('o-until');
+  if(u) u.value=offDate(offPlusDays(d.value,n.value))||'—';
+}
+
+function offDrawLines(){
+  const tb=document.getElementById('o-lines'); if(!tb) return;
+  tb.innerHTML=offEdit.lines.map((l,i)=>`<tr data-i="${i}">
+    <td><input class="l-desc" value="${esc(l.description)}" placeholder="описание на позицията"/></td>
+    <td><input class="l-unit" value="${esc(l.unit||'')}" placeholder="бр."/></td>
+    <td><input class="l-qty num" type="number" step="0.001" min="0" value="${esc(String(l.quantity))}"/></td>
+    <td><input class="l-price num" type="number" step="0.01" min="0" value="${esc(String(l.unit_price))}"/></td>
+    <td class="num"><button class="icon-btn l-del" data-i="${i}" title="Премахни">${ic('trash')}</button></td></tr>`).join('');
+  tb.querySelectorAll('input').forEach(i=>i.oninput=offPreview);
+  tb.querySelectorAll('.l-del').forEach(b=>b.onclick=()=>{ offCollect(); offEdit.lines.splice(Number(b.dataset.i),1); offDrawLines(); offPreview(); });
+}
+
+function offPayload(){
+  offCollect();
+  const e=offEdit;
+  return {title:e.title||'', issue_date:e.issue_date||null, validity_days:Number(e.validity_days)||null,
+    body:e.body||'', vat_rate:String(e.vat_rate||'0'),
+    lines:e.lines.filter(l=>l.description.trim()).map(l=>({description:l.description, unit:l.unit||null,
+      quantity:String(l.quantity||'1'), unit_price:String(l.unit_price||'0')}))};
+}
+
+function offPreview(){
+  clearTimeout(offTimer);
+  offTimer=setTimeout(async()=>{
+    const box=document.getElementById('o-preview'); if(!box) return;
+    try{
+      const payload=offPayload();
+      const p=await api('/offers/preview',{method:'POST',body:payload});
+      const cp=offCustomers.find(c=>c.id===offEdit.counterparty_id);
+      box.innerHTML=offDocHtml(p,{number:offEdit.number, title:offEdit.title,
+        issue_date:offEdit.issue_date, validity_days:offEdit.validity_days, client:cp,
+        manager:offCompany().manager_name||'', footer:offFooter()});
+    }catch(err){ box.innerHTML=`<div class="card">${empty('Прегледът не може да се покаже: '+err.message)}</div>`; }
+  },350);
+}
+
+function offFooter(){
+  const c=offCompany();
+  return [c.name, c.eik?'ЕИК '+c.eik:'', c.vat_number?'ДДС '+c.vat_number:'', c.address_line||'']
+    .filter(Boolean).join(' · ');
+}
+
+function offNewClient(main){
+  openModal({title:'Нов клиент', subtitle:'Създава се в „Контрагенти" и веднага се избира в офертата.',
+    body:`<div class="stack"><div class="field"><label>Наименование</label><input id="nc-name" placeholder="напр. Нова Технологии ЕООД"/></div>
+      <div class="row"><div class="field"><label>ЕИК</label><input id="nc-eik"/></div>
+        <div class="field"><label>ДДС №</label><input id="nc-vat"/></div></div>
+      <div class="field"><label>Адрес</label><input id="nc-addr"/></div></div>`,
+    footer:`<button class="ghost" onclick="closeModal()">Отказ</button><button class="primary" id="nc-ok">Създай</button>`,
+    onOpen:(bd)=>{ bd.querySelector('#nc-ok').onclick=async()=>{
+      const name=bd.querySelector('#nc-name').value.trim();
+      if(!name){ toast('Наименованието е задължително',true); return; }
+      const body={type:'CUSTOMER', name};
+      const eik=bd.querySelector('#nc-eik').value.trim(); if(eik) body.eik=eik;
+      const vat=bd.querySelector('#nc-vat').value.trim(); if(vat) body.vat_number=vat;
+      const addr=bd.querySelector('#nc-addr').value.trim(); if(addr) body.address=addr;
+      try{ const cp=await api('/counterparties',{method:'POST',body});
+        offCollect(); offEdit.counterparty_id=cp.id; closeModal(); toast('Клиентът е създаден'); viewOffers(main);
+      }catch(err){ toast(err.message,true); } }; }});
+}
+
+async function offSave(main){
+  const payload=offPayload();
+  if(!offEdit.counterparty_id){ toast('Избери клиент',true); return; }
+  if(!payload.title.trim()){ toast('Въведи заглавие',true); return; }
+  if(!payload.validity_days){ toast('Въведи валидност в дни',true); return; }
+  try{
+    if(offEdit.id){ await api('/offers/'+offEdit.id,{method:'PATCH',body:{...payload, counterparty_id:offEdit.counterparty_id}}); }
+    else { await api('/offers',{method:'POST',body:{...payload, counterparty_id:offEdit.counterparty_id}}); }
+    offEdit=null; toast('Офертата е запазена'); viewOffers(main);
+  }catch(err){ toast(err.message,true); }
 }
 
 /* ==================== ПОКУПКИ ==================== */

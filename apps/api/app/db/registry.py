@@ -18,6 +18,7 @@ from app.modules.firm import models as firm_models  # noqa: F401
 from app.modules.identity import models as identity_models  # noqa: F401
 from app.modules.invoicing import models as invoicing_models  # noqa: F401
 from app.modules.mobile import models as mobile_models  # noqa: F401
+from app.modules.offers import models as offers_models  # noqa: F401
 from app.modules.payments import models as payments_models  # noqa: F401
 from app.modules.payroll import models as payroll_models  # noqa: F401
 from app.modules.purchases import models as purchases_models  # noqa: F401
