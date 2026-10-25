@@ -42,13 +42,28 @@ for i in $(seq 1 30); do
 done
 
 log "Пускам тестовете срещу PostgreSQL"
+# Хранилището се монтира и тестовете се пускат ОТТАМ, а не от /app в образа:
+# образът носи само apps/api, а `tests/` чете и файлове от корена на хранилището
+# (`parents[3]`). Без монтирането събирането гърмеше с `IndexError: 3` и
+# прекъсваше ЦЕЛИЯ пробег — портата не пускаше нито един тест, а изглеждаше, че
+# е минала.
+#
+# `tests/test_infra_*.py` се изключват нарочно и видимо: те вдигат истинско git
+# хранилище и пускат `deploy.sh`, а в образа няма `git` (той е за приложението,
+# не за CI). Тези тестове се пускат в GitHub Actions (.github/workflows/api.yml,
+# ubuntu-latest), където git го има. Изключването е по шаблон, не по списък с
+# имена — нов infra тест да не остава извън която и да е от двете порти.
+REPO_ROOT_HOST="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 docker run --rm --network "$NET_NAME" \
     -e TEST_DATABASE_URL="postgresql+psycopg://test:test@${PG_NAME}:5432/aifos_test" \
     -e AI_PROVIDER=stub \
     -e ENVIRONMENT=test \
     -e SECRET_KEY=ci-test-secret-key-not-used-anywhere \
-    -w /app \
+    -e PYTHONDONTWRITEBYTECODE=1 \
+    -v "${REPO_ROOT_HOST}:/repo:ro" \
+    -w /repo/apps/api \
     "$IMAGE" \
-    python -m pytest -q -p no:warnings --tb=short
+    python -m pytest -q -p no:warnings --tb=short -p no:cacheprovider \
+        --ignore-glob='tests/test_infra_*.py'
 
 log "ТЕСТОВЕТЕ МИНАХА СРЕЩУ POSTGRESQL"
