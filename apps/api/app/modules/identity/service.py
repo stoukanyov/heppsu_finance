@@ -372,15 +372,17 @@ def confirm_totp_setup(db: Session, user: User, code: str) -> list[str]:
 def verify_second_factor(db: Session, user: User, code: str) -> bool:
     """Приема TOTP код или неизползван резервен код. Всеки от двата е еднократен.
 
-    Редът на проверките е по дължина на входа, а не „първо едното, после другото“:
+    Редът на проверките е по ФОРМАТА на входа, а не „първо едното, после другото“:
     TOTP кодът е 6 цифри, резервният — 10 знака от буквено-цифрова азбука, тоест
-    двете не могат да се сбъркат.
+    двете форми не могат да се сбъркат. Броенето на цифрите в низа обаче ги
+    бъркаше: резервен код с точно шест цифри (1 на 53) отиваше по TOTP пътя и
+    връщаше 401 — виж `totp.is_totp_code`.
     """
     row = get_totp(db, user.id)
     if row is None or row.confirmed_at is None:
         return False
 
-    if len(totp_lib.normalize_code(code)) == totp_lib.DIGITS:
+    if totp_lib.is_totp_code(code):
         counter = totp_lib.verify(
             row.secret,
             code,

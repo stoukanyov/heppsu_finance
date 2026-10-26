@@ -536,3 +536,41 @@ def test_the_counter_clears_after_a_successful_second_step(client, limited):
     assert ok.status_code == 200, ok.text
     # След нулирането има нова пълна квота.
     assert _bad_code(client) == 401
+
+
+# --------------------------------------------------------------------------
+# Резервният код с шест цифри (намерен 27.10.2026)
+# --------------------------------------------------------------------------
+# Азбуката на резервните кодове съдържа цифри, а разпознаването „TOTP или
+# резервен“ броеше цифрите в низа. Код с ТОЧНО шест цифри и четири букви — 1 на
+# 53 — отиваше по TOTP проверката и даваше 401, тоест беше негоден за влизане.
+SHEST_CIFRI = "23456-A7BCD"  # шест цифри (2,3,4,5,6,7) и четири букви
+
+
+def test_rezerven_kod_s_shest_cifri_ne_e_totp_kod():
+    """Разпознаването е по форма: шест ЦИФРИ и нищо друго."""
+    assert totp.is_totp_code("123456") is True
+    assert totp.is_totp_code("123 456") is True   # автентикаторите слагат интервал
+    assert totp.is_totp_code("123-456") is True
+    assert totp.is_totp_code(SHEST_CIFRI) is False
+    assert totp.is_totp_code(SHEST_CIFRI.lower().replace("-", "")) is False
+    assert totp.is_totp_code("12345") is False
+    assert totp.is_totp_code("1234567") is False
+
+
+def test_vlizane_s_rezerven_kod_s_shest_cifri(client, monkeypatch):
+    """Най-лошият случай: изгубен телефон и единственият останал код е такъв."""
+    from app.modules.identity import service as identity_service
+
+    monkeypatch.setattr(identity_service, "generate_recovery_code", lambda: SHEST_CIFRI)
+    _, _, codes = _enable(client, "rezerven-shest@example.com")
+    assert codes[0] == SHEST_CIFRI
+
+    r = client.post(
+        "/api/v1/auth/login/2fa",
+        json={
+            "mfa_token": _login(client, "rezerven-shest@example.com").json()["mfa_token"],
+            "code": SHEST_CIFRI,
+        },
+    )
+    assert r.status_code == 200, r.text
