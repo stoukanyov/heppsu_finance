@@ -588,6 +588,15 @@
       <a href="#" id="au-toggle">Регистрация</a>
     </div>
   </div>
+  <!-- Втора стъпка: паролата е приета, чака се код от автентикатора. -->
+  <div class="card" id="au-2fa" style="display:none;">
+    <div class="brand" style="font-size:19px;margin-bottom:6px;"><span class="logo" id="au-2fa-mark"></span>Код за потвърждение</div>
+    <div class="muted" style="margin-bottom:20px;">Въведи 6-цифрения код от автентикатора или един от резервните си кодове.</div>
+    <div class="field"><label>Код</label>
+      <input id="au-code" inputmode="text" autocomplete="one-time-code" placeholder="123456" maxlength="32" /></div>
+    <button id="au-code-submit" class="primary" style="width:100%;justify-content:center;margin-top:6px;">Потвърди</button>
+    <div class="muted" style="margin-top:14px;text-align:center;"><a href="#" id="au-code-back">Назад към входа</a></div>
+  </div>
 </div>
 
 <!-- ==================== APP SHELL ==================== -->
@@ -799,6 +808,8 @@ const NAV = [
   {sec:'Администрация', items:[
     ['team','Екип','team','team.view'], ['admin','Роли и права','shield','team.view'],
     ['audit','Одит','eye','audit.view'],
+    // Защитата е на потребителя, не на дружеството — затова без право от RBAC.
+    ['security','Защита на профила','shield'],
   ]},
 ];
 function buildNav(){
@@ -844,7 +855,9 @@ async function api(path,{method='GET',body,form}={}){
   const text=await res.text();
   let data=null; try{ data=text?JSON.parse(text):null; }catch{ data=text; }
   if(!res.ok){
-    if(res.status===401 && path!=='/auth/login') logout();
+    // Втората стъпка на входа също е „вход": сгрешен код не бива да изхвърля
+    // човека обратно при паролата — иначе всяка печатна грешка иска нов вход.
+    if(res.status===401 && path!=='/auth/login' && path!=='/auth/login/2fa') logout();
     const msg=(data&&data.detail)?(Array.isArray(data.detail)?data.detail.map(d=>d.msg).join('; '):data.detail):('Грешка '+res.status);
     // Статусът и суровият detail вървят с грешката: формата за доклади превежда
     // 422 по `loc`/`type` на езика на потребителя, вместо да показва текста на Pydantic.
@@ -1058,16 +1071,37 @@ document.getElementById('au-toggle').onclick=(e)=>{ e.preventDefault(); register
   document.getElementById('au-submit').textContent=registerMode?'Създай акаунт':'Вход';
   document.getElementById('au-toggle-text').textContent=registerMode?'Вече имаш акаунт?':'Нямаш акаунт?';
   document.getElementById('au-toggle').textContent=registerMode?'Вход':'Регистрация'; };
+/* Междинният токен от първата стъпка. Държи се само в паметта на страницата:
+   той не отваря нито една крайна точка и живее 5 минути — няма какво да се
+   пази в localStorage, а и не бива да остава след затваряне на таба. */
+let mfaToken=null;
+function showAuthStep(step){
+  document.querySelector('#auth .card').style.display = step==='code' ? 'none' : 'block';
+  document.getElementById('au-2fa').style.display = step==='code' ? 'block' : 'none';
+  if(step==='code'){ const f=document.getElementById('au-code'); f.value=''; f.focus(); }
+}
 document.getElementById('au-submit').onclick=async()=>{
   const email=document.getElementById('au-email').value.trim(), password=document.getElementById('au-pass').value;
   try{ if(registerMode){ await api('/auth/register',{method:'POST',body:{email,password,full_name:document.getElementById('au-name').value||null}}); }
-    const r=await api('/auth/login',{method:'POST',body:{email,password}}); saveTokens(r.access_token, r.refresh_token || null); await boot();
+    const r=await api('/auth/login',{method:'POST',body:{email,password}});
+    if(r.mfa_required){ mfaToken=r.mfa_token; showAuthStep('code'); return; }
+    saveTokens(r.access_token, r.refresh_token || null); await boot();
   }catch(e){ toast(e.message,true); } };
+document.getElementById('au-code-submit').onclick=async()=>{
+  const code=document.getElementById('au-code').value.trim();
+  if(!code){ toast('Въведи кода от автентикатора',true); return; }
+  try{
+    const r=await api('/auth/login/2fa',{method:'POST',body:{mfa_token:mfaToken, code}});
+    mfaToken=null; saveTokens(r.access_token, r.refresh_token || null); showAuthStep('password'); await boot();
+  }catch(e){ toast(e.message,true); document.getElementById('au-code').select(); } };
+document.getElementById('au-code-back').onclick=(e)=>{ e.preventDefault(); mfaToken=null; showAuthStep('password'); };
 document.querySelectorAll('#au-email,#au-pass').forEach(i=>i.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('au-submit').click();}));
+document.getElementById('au-code').addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('au-code-submit').click();});
 
 /* ---------- shell: икони, меню, контекстен панел ---------- */
 document.getElementById('brand-mark').innerHTML=ic('logo');
 document.getElementById('auth-mark').innerHTML=ic('logo');
+document.getElementById('au-2fa-mark').innerHTML=ic('logo');
 const _barIcons={'nav-toggle':'menu','quick-create':'plus','btn-bell':'bell','btn-help':'help','rail-toggle':'panel'};
 Object.entries(_barIcons).forEach(([id,name])=>{ const b=document.getElementById(id); if(b) b.innerHTML=ic(name); });
 document.getElementById('rail-toggle').style.visibility='hidden';
@@ -1172,6 +1206,7 @@ function logout(){
   }
   token=null; refreshToken=null; companyId=null;
   localStorage.removeItem('aifos_token'); localStorage.removeItem('aifos_refresh'); localStorage.removeItem('aifos_company');
+  mfaToken=null; showAuthStep('password');
   document.getElementById('shell').style.display='none'; document.getElementById('auth').style.display='grid'; }
 document.getElementById('top-avatar').onclick=logout;
 document.getElementById('userchip').onclick=()=>navigate('team');
@@ -1330,15 +1365,17 @@ let currentView='dashboard';
 const VIEWS={ dashboard:viewDashboard, accounting:viewAccounting, contacts:viewContacts, offers:viewOffers, invoices:viewInvoices,
   purchases:viewPurchases, banking:viewBanking, payments:viewPayments, stores:viewStores, vat:viewVat, refunds:viewRefunds, income73:viewIncome73, reports:viewReports,
   analytics:viewAnalytics, documents:viewDocuments, payroll:viewPayroll, firm:viewFirm, onboarding:viewOnboarding,
-  team:viewTeam, admin:viewAdmin, audit:viewAudit };
+  team:viewTeam, admin:viewAdmin, audit:viewAudit, security:viewSecurity };
 function navigate(view){
   currentView=view; location.hash=view;
   document.querySelectorAll('nav a').forEach(a=>a.classList.toggle('active',a.dataset.view===view));
   const main=document.getElementById('main');
   setRail('');                       // всеки екран сам решава дали ползва контекстна колона
   window.scrollTo({top:0});
-  // Таблото на кантората е над отделния клиент — то работи и без избрано дружество.
-  if(!companyId && view!=='firm'){
+  // Таблото на кантората и защитата на профила са над отделния клиент: и двете
+  // работят без избрано дружество. Без това нов акаунт не може да си включи 2FA,
+  // докато не създаде дружество.
+  if(!companyId && view!=='firm' && view!=='security'){
     main.innerHTML=`<div class="card"><div class="empty">${ic('bank')}<div>Създай или избери дружество, за да започнеш.</div>
       <button class="primary" style="margin:14px auto 0;" onclick="newCompany()">${ic('plus')}Ново дружество</button></div></div>`;
     return;
@@ -3695,10 +3732,132 @@ async function viewAudit(main){
     <div class="card">${logs.length?`<table><thead><tr><th>Кога</th><th>Метод</th><th>Път</th><th class="num">Статус</th></tr></thead><tbody>${logs.map(l=>`<tr><td class="muted">${esc(new Date(l.created_at).toLocaleString('bg-BG'))}</td><td><span class="pill s-blue na">${esc(l.method)}</span></td><td>${esc(l.path)}</td><td class="num">${l.status_code<400?`<span class="badge-ok">${l.status_code}</span>`:`<span class="badge-bad">${l.status_code}</span>`}</td></tr>`).join('')}</tbody></table>`:empty('Няма записи.')}</div>`;
 }
 
+/* ==================== ЗАЩИТА НА ПРОФИЛА (2FA) ==================== */
+/* Двуфакторната автентикация е на потребителя, не на дружеството: една сметка
+   участва в няколко дружества с различни роли, а телефонът е един. Затова
+   екранът работи и без избрано дружество. */
+async function viewSecurity(main){
+  const st=await api('/auth/2fa/status');
+  main.innerHTML=pageH('Защита на профила','Втори фактор при вход — код от приложение на телефона')+
+    `<div class="card stack" id="sec-box"></div>`;
+  secRender(st);
+}
+
+function secBox(){ return document.getElementById('sec-box'); }
+
+function secRender(st){
+  const box=secBox(); if(!box) return;
+  if(st.enabled){
+    box.innerHTML=`<div class="card-t"><h3>Двуфакторна автентикация</h3>
+        <span class="pill s-green">Включена</span></div>
+      <div class="hint">При вход след паролата се иска 6-цифрен код от автентикатора.
+        Останали неизползвани резервни кода: <strong>${st.recovery_codes_left}</strong> от 10.</div>
+      ${st.recovery_codes_left<=2?`<div class="hint" style="color:var(--warn,#B45309);">Резервните кодове са на привършване.
+        Изключи и включи отново защитата, за да получиш нови десет.</div>`:''}
+      <div class="flex"><button class="ghost" id="sec-disable">${ic('logout')}Изключи</button></div>`;
+    document.getElementById('sec-disable').onclick=secDisable;
+    return;
+  }
+  box.innerHTML=`<div class="card-t"><h3>Двуфакторна автентикация</h3>
+      <span class="pill s-gray na">Изключена</span></div>
+    <div class="hint">Паролата сама не стига, ако изтече някъде. С включена защита входът иска и
+      код, който се сменя на всеки 30 секунди и се чете само от телефона ти
+      (Google Authenticator или друго подобно приложение).</div>
+    ${st.pending?`<div class="hint">Има започнато, но непотвърдено включване — започни отначало и сканирай новия код.</div>`:''}
+    <div class="flex"><button class="primary" id="sec-enable">${ic('plus')}Включи</button></div>`;
+  document.getElementById('sec-enable').onclick=secStartSetup;
+}
+
+async function secStartSetup(){
+  const box=secBox(); box.innerHTML=loading();
+  let setup;
+  try{ setup=await api('/auth/2fa/setup',{method:'POST'}); }
+  catch(e){ toast(e.message,true); viewSecurity(document.getElementById('main')); return; }
+
+  /* QR кодът е SVG, построен на сървъра от самия otpauth URI — няма външна
+     услуга, през която тайната да мине. */
+  box.innerHTML=`<div class="card-t"><h3>Сканирай кода</h3></div>
+    <div class="row" style="align-items:flex-start;gap:20px;flex-wrap:wrap;">
+      <div style="background:#fff;padding:10px;border-radius:10px;line-height:0;" id="sec-qr"></div>
+      <div class="stack grow" style="min-width:260px;">
+        <div class="hint">1. Отвори автентикатора на телефона и сканирай квадрата.<br>
+          2. Въведи кода, който приложението показва.</div>
+        <div class="field"><label>Ако камерата не работи — въведи тайната на ръка</label>
+          <input id="sec-secret" readonly value="${esc(setup.secret)}" style="font-family:ui-monospace,monospace;letter-spacing:1px;" /></div>
+        <div class="field"><label>Код от автентикатора</label>
+          <input id="sec-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="123456" /></div>
+        <div class="flex"><button class="primary" id="sec-confirm">${ic('check')}Потвърди и включи</button>
+          <button class="ghost" id="sec-cancel">Отказ</button></div>
+      </div>
+    </div>`;
+  document.getElementById('sec-qr').innerHTML=setup.qr_svg;
+  const code=document.getElementById('sec-code'); code.focus();
+  code.addEventListener('keydown',e=>{ if(e.key==='Enter') document.getElementById('sec-confirm').click(); });
+  document.getElementById('sec-cancel').onclick=()=>viewSecurity(document.getElementById('main'));
+  document.getElementById('sec-confirm').onclick=async()=>{
+    const value=code.value.trim();
+    if(!value){ toast('Въведи кода от автентикатора',true); return; }
+    try{
+      const r=await api('/auth/2fa/confirm',{method:'POST',body:{code:value}});
+      secShowRecoveryCodes(r.recovery_codes);
+    }catch(e){ toast(e.message,true); code.select(); }
+  };
+}
+
+function secShowRecoveryCodes(codes){
+  /* Единственият момент, в който кодовете се виждат: в базата са само хешовете
+     и сървърът не може да ги покаже повторно. */
+  const box=secBox();
+  box.innerHTML=`<div class="card-t"><h3>Готово — защитата е включена</h3></div>
+    <div class="hint"><strong>Запиши тези десет резервни кода сега.</strong> Всеки от тях влиза
+      веднъж, вместо код от телефона — това е единственият вход, ако изгубиш устройството.
+      Няма да бъдат показани отново.</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;
+      font-family:ui-monospace,monospace;font-size:14px;letter-spacing:1px;">
+      ${codes.map(c=>`<div style="padding:7px 10px;border:1px solid var(--bd,#E2E8F0);border-radius:8px;text-align:center;">${esc(c)}</div>`).join('')}
+    </div>
+    <div class="flex"><button class="primary" id="sec-codes-dl">${ic('download')}Изтегли като файл</button>
+      <button class="ghost" id="sec-codes-done">Записах ги</button></div>`;
+  document.getElementById('sec-codes-dl').onclick=()=>{
+    const text='AI Finance OS — резервни кодове за двуфакторна автентикация\n'
+      +`Акаунт: ${me&&me.email?me.email:''}\n`
+      +`Издадени: ${new Date().toLocaleString('bg-BG')}\n\n`
+      +codes.join('\n')+'\n\nВсеки код влиза само веднъж.\n';
+    const url=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));
+    const a=document.createElement('a'); a.href=url; a.download='aifos-rezervni-kodove.txt';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),60000);
+  };
+  document.getElementById('sec-codes-done').onclick=()=>viewSecurity(document.getElementById('main'));
+}
+
+function secDisable(){
+  /* Иска и парола, и текущ код: открадната сесия в отворен таб не бива да е
+     достатъчна, за да падне вторият фактор. */
+  openModal({
+    title:'Изключване на двуфакторната автентикация',
+    subtitle:'Входът ще иска само имейл и парола. Резервните кодове се анулират.',
+    body:`<div class="stack">
+      <div class="field"><label>Парола</label><input id="sd-pass" type="password" autocomplete="current-password" /></div>
+      <div class="field"><label>Код от автентикатора или резервен код</label>
+        <input id="sd-code" autocomplete="one-time-code" maxlength="32" placeholder="123456" /></div></div>`,
+    footer:`<button class="ghost" onclick="closeModal()">Отказ</button><button class="primary" id="sd-ok">Изключи</button>`,
+    onOpen:(bd)=>{ bd.querySelector('#sd-pass').focus();
+      bd.querySelector('#sd-ok').onclick=async()=>{
+        const password=bd.querySelector('#sd-pass').value, code=bd.querySelector('#sd-code').value.trim();
+        if(!password||!code){ toast('Попълни парола и код',true); return; }
+        try{ await api('/auth/2fa/disable',{method:'POST',body:{password,code}});
+          closeModal(); toast('Двуфакторната автентикация е изключена');
+          viewSecurity(document.getElementById('main'));
+        }catch(e){ toast(e.message,true); }
+      }; },
+  });
+}
+
 /* ---------- start ---------- */
 showEnvBanner();
 if(token) boot(); else document.getElementById('auth').style.display='grid';
-window.addEventListener('hashchange',()=>{ const v=location.hash.replace('#',''); if(v&&v!==currentView&&companyId) navigate(v); });
+window.addEventListener('hashchange',()=>{ const v=location.hash.replace('#','');
+  if(v&&v!==currentView&&(companyId||v==='security'||v==='firm')) navigate(v); });
 </script>
 </body>
 </html>

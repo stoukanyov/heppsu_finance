@@ -1,23 +1,29 @@
-"""Бизнес логика за Identity: регистрация, автентикация и refresh токени."""
+"""Бизнес логика за Identity: регистрация, автентикация, refresh токени и 2FA."""
 from __future__ import annotations
 
 import datetime as dt
 import uuid
 
+import jwt
 from fastapi import HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
+from app.core import totp as totp_lib
 from app.core.config import settings
 from app.core.security import (
     create_access_token,
+    create_mfa_challenge_token,
+    decode_mfa_challenge_token,
+    generate_recovery_code,
     generate_refresh_token,
     hash_password,
+    hash_recovery_code,
     hash_refresh_token,
     verify_password,
 )
-from app.modules.identity.models import RefreshToken, RevokeReason, User
-from app.modules.identity.schemas import Token, UserCreate
+from app.modules.identity.models import RefreshToken, RevokeReason, TotpRecoveryCode, User, UserTotp
+from app.modules.identity.schemas import MfaChallenge, Token, TotpSetup, TotpStatus, UserCreate
 
 # Съобщенията са нарочно еднакви за „няма такъв токен“ и „токенът е отменен“ —
 # нападателят не бива да научава дали е познал съществуващ токен.
@@ -255,3 +261,194 @@ def logout(db: Session, raw_token: str, *, all_devices: bool = False) -> int:
         db.commit()
         return 1
     return 0
+
+
+# ==================== Двуфакторна автентикация (TOTP) ====================
+# Текстовете са еднакви за „грешен TOTP код“ и „грешен резервен код“ — отговорът
+# не бива да казва коя от двете азбуки е била разпозната.
+_INVALID_CODE = "Грешен или вече използван код."
+_MFA_NOT_ENABLED = "Двуфакторната автентикация не е включена за този акаунт."
+_MFA_ALREADY_ENABLED = (
+    "Двуфакторната автентикация вече е включена. Изключи я, за да свържеш друго устройство."
+)
+_MFA_SETUP_MISSING = "Няма започнато включване. Започни отначало и сканирай новия QR код."
+_MFA_CHALLENGE_INVALID = "Междинната стъпка е изтекла. Влез отново с имейл и парола."
+
+
+def get_totp(db: Session, user_id: uuid.UUID) -> UserTotp | None:
+    return db.scalar(select(UserTotp).where(UserTotp.user_id == user_id))
+
+
+def totp_enabled(db: Session, user: User) -> bool:
+    """Включена ли е 2FA — тоест има ли **потвърдена** тайна.
+
+    Започнатото, но непотвърдено включване нарочно не се брои: иначе човек, който
+    е затворил екрана, преди да сканира кода, остава заключен извън акаунта си.
+    """
+    row = get_totp(db, user.id)
+    return row is not None and row.confirmed_at is not None
+
+
+def _unused_recovery_codes(db: Session, user_id: uuid.UUID) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(TotpRecoveryCode)
+            .where(TotpRecoveryCode.user_id == user_id, TotpRecoveryCode.used_at.is_(None))
+        )
+        or 0
+    )
+
+
+def totp_status(db: Session, user: User) -> TotpStatus:
+    row = get_totp(db, user.id)
+    enabled = row is not None and row.confirmed_at is not None
+    return TotpStatus(
+        enabled=enabled,
+        pending=row is not None and row.confirmed_at is None,
+        recovery_codes_left=_unused_recovery_codes(db, user.id) if enabled else 0,
+    )
+
+
+def begin_totp_setup(db: Session, user: User) -> TotpSetup:
+    """Издава нова тайна и връща QR кода. Докато не бъде потвърдена, не важи нищо.
+
+    Повторното започване подменя непотвърдената тайна: първият QR код може да е
+    останал на екрана на чужд телефон или в изтрит имейл, а потвърждението е
+    единственото доказателство кое устройство наистина е в ръцете на човека.
+    """
+    row = get_totp(db, user.id)
+    if row is not None and row.confirmed_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_MFA_ALREADY_ENABLED)
+
+    secret = totp_lib.generate_secret()
+    if row is None:
+        row = UserTotp(id=uuid.uuid4(), user_id=user.id, secret=secret)
+        db.add(row)
+    else:
+        row.secret = secret
+        row.last_counter = None
+    db.commit()
+
+    uri = totp_lib.otpauth_uri(secret, account=user.email, issuer=settings.TOTP_ISSUER)
+    return TotpSetup(secret=secret, otpauth_uri=uri, qr_svg=totp_lib.qr_svg(uri))
+
+
+def _issue_recovery_codes(db: Session, user: User) -> list[str]:
+    """Нови резервни кодове; старите се изтриват. Чистият вид се връща само тук."""
+    db.execute(delete(TotpRecoveryCode).where(TotpRecoveryCode.user_id == user.id))
+    codes = [generate_recovery_code() for _ in range(settings.TOTP_RECOVERY_CODE_COUNT)]
+    for code in codes:
+        db.add(
+            TotpRecoveryCode(id=uuid.uuid4(), user_id=user.id, code_hash=hash_recovery_code(code))
+        )
+    return codes
+
+
+def confirm_totp_setup(db: Session, user: User, code: str) -> list[str]:
+    """Потвърждава включването с истински код и връща резервните кодове.
+
+    Чак тук тайната става активна. Връщаните кодове са единственият им чист вид —
+    в базата остават само хешовете.
+    """
+    row = get_totp(db, user.id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_MFA_SETUP_MISSING)
+    if row.confirmed_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_MFA_ALREADY_ENABLED)
+
+    counter = totp_lib.verify(row.secret, code, window=settings.TOTP_WINDOW_STEPS)
+    if counter is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_INVALID_CODE)
+
+    row.confirmed_at = _now()
+    # Кодът от потвърждението е изразходван — същата стъпка не минава втори път.
+    row.last_counter = counter
+    codes = _issue_recovery_codes(db, user)
+    db.commit()
+    return codes
+
+
+def verify_second_factor(db: Session, user: User, code: str) -> bool:
+    """Приема TOTP код или неизползван резервен код. Всеки от двата е еднократен.
+
+    Редът на проверките е по дължина на входа, а не „първо едното, после другото“:
+    TOTP кодът е 6 цифри, резервният — 10 знака от буквено-цифрова азбука, тоест
+    двете не могат да се сбъркат.
+    """
+    row = get_totp(db, user.id)
+    if row is None or row.confirmed_at is None:
+        return False
+
+    if len(totp_lib.normalize_code(code)) == totp_lib.DIGITS:
+        counter = totp_lib.verify(
+            row.secret,
+            code,
+            window=settings.TOTP_WINDOW_STEPS,
+            last_counter=row.last_counter,
+        )
+        if counter is None:
+            return False
+        row.last_counter = counter
+        db.commit()
+        return True
+
+    recovery = db.scalar(
+        select(TotpRecoveryCode).where(
+            TotpRecoveryCode.user_id == user.id,
+            TotpRecoveryCode.code_hash == hash_recovery_code(code),
+            TotpRecoveryCode.used_at.is_(None),
+        )
+    )
+    if recovery is None:
+        return False
+    # Редът не се трие: следата „влизано е с резервен код“ е сигнал за изгубен телефон.
+    recovery.used_at = _now()
+    db.commit()
+    return True
+
+
+def disable_totp(db: Session, user: User, password: str, code: str) -> None:
+    """Изключва 2FA. Иска и парола, и текущ код — открадната сесия не стига.
+
+    Иначе достъпът до вече влязъл браузър би бил достатъчен, за да падне вторият
+    фактор, и защитата щеше да важи само до първия отворен таб.
+    """
+    if not totp_enabled(db, user):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_MFA_NOT_ENABLED)
+    if not verify_password(password, user.hashed_password):
+        # 400, а не 401: заявката Е автентикирана (валиден access токен), сгрешена е
+        # паролата, която се иска втори път за това действие. С 401 клиентът го чете
+        # като „сесията изтече" и изхвърля човека от приложението — проверено в
+        # браузъра: сгрешена парола в диалога за изключване водеше до изход.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Грешна парола")
+    if not verify_second_factor(db, user, code):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_INVALID_CODE)
+
+    db.execute(delete(TotpRecoveryCode).where(TotpRecoveryCode.user_id == user.id))
+    db.execute(delete(UserTotp).where(UserTotp.user_id == user.id))
+    db.commit()
+
+
+def mfa_challenge(user: User) -> MfaChallenge:
+    """Отговорът на първата стъпка: паролата е вярна, чака се код."""
+    return MfaChallenge(
+        mfa_token=create_mfa_challenge_token(
+            subject=str(user.id), expires_seconds=settings.MFA_CHALLENGE_TTL_SECONDS
+        ),
+        expires_in=settings.MFA_CHALLENGE_TTL_SECONDS,
+    )
+
+
+def user_from_mfa_token(db: Session, raw_token: str) -> User:
+    """Потребителят от междинния токен; всичко нередно е 401 с един и същ текст."""
+    try:
+        payload = decode_mfa_challenge_token(raw_token)
+        user_id = uuid.UUID(payload["sub"])
+    except (jwt.PyJWTError, KeyError, TypeError, ValueError):
+        raise _unauthorized(_MFA_CHALLENGE_INVALID) from None
+
+    user = db.get(User, user_id)
+    if user is None or not user.is_active or not totp_enabled(db, user):
+        raise _unauthorized(_MFA_CHALLENGE_INVALID)
+    return user

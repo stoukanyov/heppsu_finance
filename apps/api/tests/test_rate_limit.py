@@ -1,44 +1,10 @@
 """Тестове за ограничаване на опитите за вход (brute force защита)."""
 import time
 
-import pytest
-
 from tests.conftest import register_and_login
 
 GOOD = "supersecret1"
 BAD = "грешна-парола"
-
-
-@pytest.fixture()
-def limited():
-    """Включва ограничението само за този тест и чисти броячите след него."""
-    from app.core.config import settings
-    from app.core.rate_limit import reset_all_limiters
-
-    original = (
-        settings.RATE_LIMIT_ENABLED,
-        settings.LOGIN_RATE_LIMIT_ATTEMPTS,
-        settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
-        settings.LOGIN_RATE_LIMIT_ACCOUNT_ATTEMPTS,
-        settings.LOGIN_RATE_LIMIT_IP_ATTEMPTS,
-    )
-    settings.RATE_LIMIT_ENABLED = True
-    settings.LOGIN_RATE_LIMIT_ATTEMPTS = 5
-    settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS = 900
-    # Високо по подразбиране, за да не пречат на тестовете за прага „IP+акаунт“;
-    # тестовете, които ги проверяват, ги свалят сами.
-    settings.LOGIN_RATE_LIMIT_ACCOUNT_ATTEMPTS = 1000
-    settings.LOGIN_RATE_LIMIT_IP_ATTEMPTS = 1000
-    reset_all_limiters()
-    yield settings
-    (
-        settings.RATE_LIMIT_ENABLED,
-        settings.LOGIN_RATE_LIMIT_ATTEMPTS,
-        settings.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
-        settings.LOGIN_RATE_LIMIT_ACCOUNT_ATTEMPTS,
-        settings.LOGIN_RATE_LIMIT_IP_ATTEMPTS,
-    ) = original
-    reset_all_limiters()
 
 
 def _login(client, email: str, password: str):

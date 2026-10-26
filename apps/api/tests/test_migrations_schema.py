@@ -81,7 +81,10 @@ def test_timestamp_columns_have_a_default(migrated_db, column):
     )
 
 
-@pytest.mark.parametrize("table", ["crash_reports", "deadline_filings", "support_reports"])
+@pytest.mark.parametrize(
+    "table",
+    ["crash_reports", "deadline_filings", "support_reports", "user_totp", "totp_recovery_codes"],
+)
 def test_insert_without_timestamps_succeeds(migrated_db, table):
     """Директното възпроизвеждане на дефекта, който мина покрай тестовете.
 
@@ -115,3 +118,37 @@ def test_insert_without_timestamps_succeeds(migrated_db, table):
     assert stored[0] is not None
     assert stored[1] is not None
     migrated_db.rollback()
+
+
+def test_migrations_and_models_describe_the_same_schema(migrated_db):
+    """Таблиците и колоните от миграциите = тези от моделите.
+
+    Проверката по-горе хваща само липсващ `server_default`. Това тук хваща
+    по-едрия вид разминаване: забравена миграция за нов модел, или колона,
+    добавена в модела и не в миграцията. Локално `create_all` крие и двете,
+    защото вдига схемата от моделите — на сървъра схемата идва от миграциите.
+    """
+    from app.db import registry  # noqa: F401 — регистрира моделите
+    from app.db.base import Base
+
+    migrated = {
+        name
+        for (name,) in migrated_db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    } - {"alembic_version"}
+    modelled = set(Base.metadata.tables)
+
+    assert not modelled - migrated, "модели без миграция: " + ", ".join(sorted(modelled - migrated))
+    assert not migrated - modelled, "таблици без модел: " + ", ".join(sorted(migrated - modelled))
+
+    differences = []
+    for table in sorted(modelled):
+        in_db = {row[1] for row in migrated_db.execute(f"PRAGMA table_info({table})").fetchall()}
+        in_model = set(Base.metadata.tables[table].columns.keys())
+        if in_db != in_model:
+            differences.append(
+                f"{table}: само в модела {sorted(in_model - in_db)}, "
+                f"само в базата {sorted(in_db - in_model)}"
+            )
+    assert not differences, "; ".join(differences)

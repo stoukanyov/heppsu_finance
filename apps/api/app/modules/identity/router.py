@@ -8,8 +8,15 @@ from app.modules.identity import service
 from app.modules.identity.schemas import (
     LoginRequest,
     LogoutRequest,
+    MfaChallenge,
     RefreshRequest,
     Token,
+    TotpConfirmRequest,
+    TotpDisableRequest,
+    TotpRecoveryCodes,
+    TotpSetup,
+    TotpStatus,
+    TwoFactorLoginRequest,
     UserCreate,
     UserOut,
 )
@@ -54,9 +61,17 @@ def _client_meta(request: Request) -> tuple[str | None, str | None]:
     return request.headers.get("user-agent"), (request.client.host if request.client else None)
 
 
-@router.post("/auth/login", response_model=Token)
-def login(data: LoginRequest, db: DbSession, guard: LoginRateLimit, request: Request) -> Token:
-    """Издава двойка токени: кратък access (JWT) и дълъг refresh (непрозрачен, отменяем)."""
+@router.post("/auth/login", response_model=Token | MfaChallenge)
+def login(
+    data: LoginRequest, db: DbSession, guard: LoginRateLimit, request: Request
+) -> Token | MfaChallenge:
+    """Издава двойка токени, или — при включена 2FA — иска код (втора стъпка).
+
+    Отговорът е един от двата: `Token` (access + refresh) или `MfaChallenge`
+    (`mfa_required: true` + междинен токен). Клиентът различава двата по
+    `mfa_required`; стар клиент, който не знае за 2FA, няма да намери
+    `access_token` и ще покаже грешка, вместо да реши, че е влязъл.
+    """
     # Проверката е преди сверяването на паролата — изчерпаният праг връща 429.
     guard.check(data.email)
     user = service.authenticate(db, data.email, data.password)
@@ -66,7 +81,36 @@ def login(data: LoginRequest, db: DbSession, guard: LoginRateLimit, request: Req
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Грешен имейл или парола",
         )
+    if service.totp_enabled(db, user):
+        # Броячът НЕ се нулира тук. Вярната парола още не е вход, а нулирането би
+        # дало неограничени опити за кода: нападател, който знае паролата, щеше да
+        # изчиства наказанието си с нов `/auth/login` след всеки пети сгрешен код.
+        return service.mfa_challenge(user)
     guard.reset(data.email)  # успешен вход → броячът се нулира
+    user_agent, client_ip = _client_meta(request)
+    return service.issue_token_pair(db, user, user_agent=user_agent, client_ip=client_ip)
+
+
+@router.post("/auth/login/2fa", response_model=Token)
+def login_second_factor(
+    data: TwoFactorLoginRequest, db: DbSession, guard: LoginRateLimit, request: Request
+) -> Token:
+    """Втората стъпка: междинен токен + код (TOTP или резервен) → двойка токени.
+
+    Опитите минават през **същия** брояч, с който се пази паролата (scope
+    „login“, субект — имейлът). Отделен брояч би дал на налучкването на кода
+    пълна собствена квота, тоест 6 цифри срещу 5 опита биха станали 6 цифри
+    срещу 10.
+    """
+    user = service.user_from_mfa_token(db, data.mfa_token)
+    guard.check(user.email)
+    if not service.verify_second_factor(db, user, data.code):
+        guard.register_failure(user.email, reason="invalid_2fa_code")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Грешен или вече използван код.",
+        )
+    guard.reset(user.email)
     user_agent, client_ip = _client_meta(request)
     return service.issue_token_pair(db, user, user_agent=user_agent, client_ip=client_ip)
 
@@ -98,3 +142,52 @@ def logout(data: LogoutRequest, db: DbSession) -> Response:
 @router.get("/auth/me", response_model=UserOut)
 def me(user: CurrentUser) -> UserOut:
     return UserOut.model_validate(user)
+
+
+# ==================== Двуфакторна автентикация ====================
+# 2FA е на потребителя, не на дружеството: една сметка е в няколко дружества с
+# различни роли, а телефонът е един. Затова тук няма право от RBAC каталога —
+# всеки управлява своя втори фактор и нищо повече.
+@router.get("/auth/2fa/status", response_model=TotpStatus)
+def totp_status(user: CurrentUser, db: DbSession) -> TotpStatus:
+    return service.totp_status(db, user)
+
+
+@router.post("/auth/2fa/setup", response_model=TotpSetup)
+def totp_setup(user: CurrentUser, db: DbSession) -> TotpSetup:
+    """Издава нова тайна и QR код. Тайната НЕ важи, докато не бъде потвърдена."""
+    return service.begin_totp_setup(db, user)
+
+
+@router.post("/auth/2fa/confirm", response_model=TotpRecoveryCodes)
+def totp_confirm(
+    data: TotpConfirmRequest, user: CurrentUser, db: DbSession, guard: LoginRateLimit
+) -> TotpRecoveryCodes:
+    """Потвърждава включването с код от автентикатора и връща резервните кодове.
+
+    Кодовете се виждат **само в този отговор** — в базата остават само хешовете.
+    """
+    guard.check(user.email)
+    try:
+        codes = service.confirm_totp_setup(db, user, data.code)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_400_BAD_REQUEST:
+            guard.register_failure(user.email, reason="invalid_2fa_setup_code")
+        raise
+    return TotpRecoveryCodes(recovery_codes=codes)
+
+
+@router.post("/auth/2fa/disable", status_code=status.HTTP_204_NO_CONTENT)
+def totp_disable(
+    data: TotpDisableRequest, user: CurrentUser, db: DbSession, guard: LoginRateLimit
+) -> Response:
+    """Изключва 2FA. Иска парола И текущ код — открадната сесия не е достатъчна."""
+    guard.check(user.email)
+    try:
+        service.disable_totp(db, user, data.password, data.code)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_400_BAD_REQUEST:
+            guard.register_failure(user.email, reason="invalid_2fa_disable")
+        raise
+    guard.reset(user.email)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -7,6 +7,7 @@ pydantic-settings==2.14.2
 email-validator==2.2.0
 pyjwt==2.15.0
 bcrypt==5.0.0
+segno==1.6.6               # QR код за 2FA (чист Python, без Pillow)
 python-multipart==0.0.32
 psycopg[binary]==3.3.4
 anthropic==0.120.0
