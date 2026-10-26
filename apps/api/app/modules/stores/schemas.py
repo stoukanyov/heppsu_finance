@@ -38,6 +38,11 @@ class NamedTotal(BaseModel):
     key: str          # име на приложение / държава / магазин / период
     units: int
     proceeds: Decimal
+    # Валутата на реда, когато е ЕДНА. Празно значи „сборът е от повече от една
+    # валута“ — тогава числото не бива да се показва с валутен знак. Реалните
+    # отчети са многовалутни (един абонамент от Швейцария е в CHF, българският —
+    # в EUR), а по-рано всичко се етикетираше с базовата валута на дружеството.
+    currency: str = ""
 
 
 class StoreAnalyticsOut(BaseModel):
@@ -45,7 +50,8 @@ class StoreAnalyticsOut(BaseModel):
     date_to: dt.date | None
     total_units: int
     total_proceeds: Decimal
-    currency: str
+    currency: str                   # празно, когато приходите са в повече от една валута
+    by_currency: list[NamedTotal]   # приходите по валути — единственият верен сбор
     by_app: list[NamedTotal]        # най-продавани приложения (подредени)
     by_country: list[NamedTotal]    # по държави
     by_platform: list[NamedTotal]   # App Store vs Google Play

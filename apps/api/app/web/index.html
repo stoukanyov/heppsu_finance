@@ -2304,15 +2304,21 @@ async function viewStores(main){
     try{
       const a=await api('/stores/analytics');
       if(!a.total_units && !Number(a.total_proceeds)){ box.innerHTML=`<div class="card">${empty('Няма данни още. Натисни „Синхронизирай", за да заредиш продажби от отчетите на магазините.')}</div>`; return; }
-      const cur=a.currency;
+      // Валутата е на РЕДА, не на дружеството: отчетите са многовалутни (един
+      // абонамент от Швейцария е в CHF). Празна валута значи сбор през повече
+      // от една — тогава числото се показва без валутен знак, а истинският
+      // сбор е в „Приходи по валути“.
+      const par=(i)=>`${fmt(i.proceeds)}${i.currency?' '+i.currency:''}`;
+      const valuti=(a.by_currency||[]).filter(c=>Number(c.proceeds)!==0);
+      const obshto = valuti.length ? valuti.map(par).join(' · ') : (a.currency?`0,00 ${a.currency}`:'0,00');
       const kpi=(l,v,icon,cls)=>`<div class="card kpi"><div class="top"><div><div class="l">${l}</div><div class="v">${v}</div></div><div class="chip ${cls}">${ic(icon)}</div></div></div>`;
-      const barTable=(items,unit)=>{ const mx=Math.max(...items.map(i=>Number(i.proceeds)),1);
-        return `<table><tbody>${items.slice(0,8).map(i=>`<tr><td style="width:38%">${esc(i.key)}</td><td style="width:40%"><div class="bar"><span style="width:${Math.max(3,Number(i.proceeds)/mx*100)}%;background:var(--accent)"></span></div></td><td class="num">${fmt(i.proceeds)} ${cur}</td><td class="num muted">${fmt0(i.units)} ${unit}</td></tr>`).join('')}</tbody></table>`; };
+      const barTable=(items,unit)=>{ const mx=Math.max(...items.map(i=>Math.abs(Number(i.proceeds))),1);
+        return `<table><tbody>${items.slice(0,8).map(i=>`<tr><td style="width:38%">${esc(i.key)}</td><td style="width:40%"><div class="bar"><span style="width:${Math.max(3,Math.abs(Number(i.proceeds))/mx*100)}%;background:var(--accent)"></span></div></td><td class="num">${par(i)}</td><td class="num muted">${fmt0(i.units)} ${unit}</td></tr>`).join('')}</tbody></table>`; };
       const platItems=a.by_platform.map((p,i)=>({label:p.key,value:Number(p.proceeds),color:PALETTE[i]}));
       const ptot=platItems.reduce((s,i)=>s+i.value,0)||1;
       box.innerHTML=`
         <div class="kpis" style="margin-bottom:16px;">
-          ${kpi('Общо приходи',fmt(a.total_proceeds)+' '+cur,'trend','c-green')}
+          ${kpi('Общо приходи',esc(obshto),'trend','c-green')}
           ${kpi('Общо продажби',fmt0(a.total_units)+' бр.','apps','c-violet')}
           ${kpi('Топ приложение',esc(a.top_app||'—'),'apps','c-blue')}
           ${kpi('Топ държава',esc(a.top_country||'—'),'globe','c-teal')}
@@ -2322,10 +2328,11 @@ async function viewStores(main){
           <div class="card"><div class="card-t"><h3>По държави</h3></div>${barTable(a.by_country,'бр.')}</div>
         </div>
         <div class="cols">
+          <div class="card"><div class="card-t"><h3>Приходи по валути</h3><span class="hint" style="text-align:right;">без преобразуване</span></div>${valuti.length?barTable(valuti,'бр.')+`<div class="hint" style="margin-top:10px;">Магазинът плаща във валутата на купувача. Системата няма източник на курсове, затова сумите не се събират в една валута.</div>`:empty('Няма приходи за периода.')}</div>
           <div class="card"><div class="card-t"><h3>App Store срещу Google Play</h3></div><div class="flex" style="gap:20px;align-items:center;">
             <div style="position:relative;display:grid;place-items:center;">${donut(platItems,150)}<div style="position:absolute;text-align:center;"><div class="muted" style="font-size:11px;">Приходи</div><div style="font-weight:700;">${fmt0(ptot)}</div></div></div>
             <div class="legend" style="flex:1;">${platItems.map(i=>`<div class="li"><span><span class="dot" style="background:${i.color}"></span>${esc(i.label)}</span><b>${Math.round(i.value/ptot*100)}%</b></div>`).join('')}</div></div></div>
-          <div class="card"><div class="card-t"><h3>По месеци</h3></div>${(() => { const mx=Math.max(...a.by_month.map(m=>Number(m.proceeds)),1); return `<div style="display:flex;align-items:flex-end;gap:10px;height:150px;padding-top:10px;">${a.by_month.map(m=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;"><div style="width:100%;background:var(--accent-soft);border-radius:6px 6px 0 0;height:${Math.max(4,Number(m.proceeds)/mx*100)}%"></div><div class="hint" style="margin-top:6px;">${esc(m.key.slice(2))}</div></div>`).join('')}</div>`; })()}</div>
+          <div class="card"><div class="card-t"><h3>По месеци</h3></div>${(() => { const mx=Math.max(...a.by_month.map(m=>Math.abs(Number(m.proceeds))),1); return `<div style="display:flex;align-items:flex-end;gap:10px;height:150px;padding-top:10px;">${a.by_month.map(m=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;" title="${esc(par(m))}"><div style="width:100%;background:var(--accent-soft);border-radius:6px 6px 0 0;height:${Math.max(4,Math.abs(Number(m.proceeds))/mx*100)}%"></div><div class="hint" style="margin-top:6px;">${esc(m.key.slice(2))}</div></div>`).join('')}</div>`; })()}</div>
         </div>`;
     }catch(e){ box.innerHTML=`<div class="card">${empty(e.message)}</div>`; }
   };

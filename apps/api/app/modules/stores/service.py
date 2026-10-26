@@ -113,8 +113,20 @@ def sync_sales(
     )
 
 
+def _edna_valuta(valuti: set[str]) -> str:
+    """Валутата, ако е една. Иначе празно — сборът няма валута."""
+    realni = {v for v in valuti if v}
+    return realni.pop() if len(realni) == 1 else ""
+
+
 def _rank(bucket: dict[str, list], top_n: int | None = None) -> list[NamedTotal]:
-    items = [NamedTotal(key=k, units=u, proceeds=p.quantize(Decimal("0.01"))) for k, (u, p) in bucket.items()]
+    items = [
+        NamedTotal(
+            key=k, units=u, proceeds=p.quantize(Decimal("0.01")),
+            currency=_edna_valuta(valuti),
+        )
+        for k, (u, p, valuti) in bucket.items()
+    ]
     items.sort(key=lambda x: (x.proceeds, x.units), reverse=True)
     return items[:top_n] if top_n else items
 
@@ -139,34 +151,54 @@ def store_analytics(
     by_country: dict[str, list] = {}
     by_platform: dict[str, list] = {}
     by_month: dict[str, list] = {}
+    by_currency: dict[str, list] = {}
     total_units = 0
     total_proceeds = ZERO
+    valuti: set[str] = set()
 
-    def add(bucket: dict, key: str, units: int, proceeds: Decimal):
-        cur = bucket.setdefault(key, [0, ZERO])
+    def add(bucket: dict, key: str, units: int, proceeds: Decimal, currency: str):
+        cur = bucket.setdefault(key, [0, ZERO, set()])
         cur[0] += units
         cur[1] += proceeds
+        cur[2].add(currency)
 
     labels = {StorePlatform.APP_STORE: "App Store", StorePlatform.GOOGLE_PLAY: "Google Play"}
     for s in sales:
         total_units += s.units
         total_proceeds += s.proceeds
-        add(by_app, s.app_name, s.units, s.proceeds)
-        add(by_country, s.country, s.units, s.proceeds)
-        add(by_platform, labels[s.platform], s.units, s.proceeds)
-        add(by_month, s.report_date.strftime("%Y-%m"), s.units, s.proceeds)
+        valuta = (s.currency or "").strip()
+        valuti.add(valuta)
+        add(by_app, s.app_name, s.units, s.proceeds, valuta)
+        add(by_country, s.country, s.units, s.proceeds, valuta)
+        add(by_platform, labels[s.platform], s.units, s.proceeds, valuta)
+        add(by_month, s.report_date.strftime("%Y-%m"), s.units, s.proceeds, valuta)
+        # Без валута („безплатно изтегляне“ в отчета на Apple) редът няма какво
+        # да добави към приходите по валути.
+        if valuta:
+            add(by_currency, valuta, s.units, s.proceeds, valuta)
 
     ranked_app = _rank(by_app)
     ranked_country = _rank(by_country)
     months = sorted(
-        (NamedTotal(key=k, units=u, proceeds=p.quantize(Decimal("0.01"))) for k, (u, p) in by_month.items()),
+        (
+            NamedTotal(
+                key=k, units=u, proceeds=p.quantize(Decimal("0.01")),
+                currency=_edna_valuta(v),
+            )
+            for k, (u, p, v) in by_month.items()
+        ),
         key=lambda x: x.key,
     )
     return StoreAnalyticsOut(
         date_from=date_from, date_to=date_to,
         total_units=total_units,
         total_proceeds=total_proceeds.quantize(Decimal("0.01")),
-        currency=company.base_currency,
+        # Валутата е ТАЗИ НА ОТЧЕТИТЕ, не базовата на дружеството. По-рано тук
+        # стоеше `company.base_currency` и 0,80 CHF от Швейцария се изписваха
+        # като „0,80 EUR“. Няма източник на курсове в системата, затова сборът
+        # през валути не се преобразува, а се показва по валута.
+        currency=_edna_valuta(valuti),
+        by_currency=_rank(by_currency),
         by_app=ranked_app,
         by_country=ranked_country,
         by_platform=_rank(by_platform),

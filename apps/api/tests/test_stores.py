@@ -460,3 +460,69 @@ def test_es256_i_rs256_se_podpisvat():
     assert jwt.encode({"a": 1}, es, algorithm="ES256")
     rs = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     assert jwt.encode({"a": 1}, rs, algorithm="RS256")
+
+
+def test_analitikata_ne_etiketira_chuzhda_valuta_kato_bazovata(client, monkeypatch):
+    """0,80 CHF от Швейцария не са „0,80 EUR“.
+
+    `currency` идваше от `company.base_currency`, тоест екранът етикетираше
+    всеки приход с валутата на дружеството. Реалните отчети са многовалутни и
+    системата няма източник на курсове — затова сборът през валути няма валута,
+    а истинският сбор е `by_currency`.
+    """
+    from app.modules.stores import service as stores_service
+    from app.modules.stores.connectors.base import StoreConnector, StoreSaleData
+    from app.modules.stores.models import StoreProductType
+
+    def red(valuta: str, suma: str, darzhava: str, den: int) -> StoreSaleData:
+        return StoreSaleData(
+            platform=StorePlatform.GOOGLE_PLAY, report_date=dt.date(2026, 10, den),
+            app_name="Beagle Owner Plus", app_identifier="com.heppsu.myBeagle",
+            country=darzhava, units=1, proceeds=Decimal(suma), currency=valuta,
+            product_type=StoreProductType.SUBSCRIPTION,
+        )
+
+    class Mnogovalutno(StoreConnector):
+        platform = StorePlatform.GOOGLE_PLAY
+
+        def fetch_sales(self, date_from, date_to):
+            return [red("CHF", "0.80", "CH", 14), red("EUR", "0.83", "BG", 6)]
+
+    monkeypatch.setattr(stores_service, "get_connector", lambda p: Mnogovalutno())
+    h = _setup(client, "st-val2@example.com")
+    client.post(f"{ST}/GOOGLE_PLAY/sync?date_from=2026-10-01&date_to=2026-10-31", headers=h)
+    a = client.get(f"{ST}/analytics", headers=h).json()
+
+    # Сборът през две валути няма валута — не е „EUR“, защото дружеството е в EUR.
+    assert a["currency"] == ""
+    po_valuti = {c["key"]: Decimal(c["proceeds"]) for c in a["by_currency"]}
+    assert po_valuti == {"CHF": Decimal("0.80"), "EUR": Decimal("0.83")}
+    # Редът по държава носи своята валута, защото е една.
+    po_darzhavi = {c["key"]: c["currency"] for c in a["by_country"]}
+    assert po_darzhavi == {"CH": "CHF", "BG": "EUR"}
+    # Приложението е едно, но в две валути → редът няма валута.
+    assert [c["currency"] for c in a["by_app"]] == [""]
+
+
+def test_analitikata_s_edna_valuta_ya_nazovava(client, monkeypatch):
+    from app.modules.stores import service as stores_service
+    from app.modules.stores.connectors.base import StoreConnector, StoreSaleData
+    from app.modules.stores.models import StoreProductType
+
+    class Ednovalutno(StoreConnector):
+        platform = StorePlatform.APP_STORE
+
+        def fetch_sales(self, date_from, date_to):
+            return [StoreSaleData(
+                platform=StorePlatform.APP_STORE, report_date=dt.date(2026, 10, 2),
+                app_name="My Life Within", app_identifier="mylifewithin-ios-001",
+                country="BG", units=2, proceeds=Decimal("4.20"), currency="EUR",
+                product_type=StoreProductType.APP,
+            )]
+
+    monkeypatch.setattr(stores_service, "get_connector", lambda p: Ednovalutno())
+    h = _setup(client, "st-val3@example.com")
+    client.post(f"{ST}/APP_STORE/sync?date_from=2026-10-01&date_to=2026-10-31", headers=h)
+    a = client.get(f"{ST}/analytics", headers=h).json()
+    assert a["currency"] == "EUR"
+    assert [c["key"] for c in a["by_currency"]] == ["EUR"]
