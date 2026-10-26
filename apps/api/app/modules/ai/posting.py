@@ -34,7 +34,7 @@ from app.modules.accounting.schemas import (
     JournalEntryOut,
     JournalLineIn,
 )
-from app.modules.ai.llm import get_llm_client
+from app.modules.ai.llm import AiNotConfigured, get_llm_client
 from app.modules.ai.models import DocumentExtraction, ExpenseClassification
 from app.modules.ai.schemas import ExpenseClassificationOut, PostingProposalOut
 from app.modules.companies.models import Company
@@ -350,6 +350,10 @@ def classify_expense(
     }
     try:
         raw = get_llm_client().classify_expense(context)
+    except AiNotConfigured as exc:
+        # Ненастроеният AI не е повреда: предложението минава без класификация,
+        # а човекът вижда какво липсва — вместо измислена сметка и данъчен режим.
+        return None, None, [str(exc)]
     except Exception as exc:  # noqa: BLE001 — класификацията е подпомагаща, не блокираща
         return None, None, [f"AI класификацията не бе достъпна: {type(exc).__name__}."]
 
@@ -384,7 +388,7 @@ def classify_expense(
         ExpenseClassification(
             company_id=company.id,
             document_id=doc.id,
-            model=settings.AI_MODEL if settings.resolved_ai_provider == "anthropic" else "stub",
+            model=settings.AI_MODEL if settings.ai_provider == "anthropic" else "stub",
             account_code=classification.account_code[:20],
             account_rationale=(classification.account_rationale or None),
             is_deductible=classification.is_deductible,

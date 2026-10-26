@@ -1656,10 +1656,13 @@ function renderDashRail(){
 
     ${aiCard({
       title:'AI Асистент',
-      status: cc ? 'Онлайн' : 'Недостъпен',
-      text: cc ? `<div>${esc(cc.summary)}</div>${(cc.risks||[]).length
+      // Числата на таблото са от базата и важат винаги. Когато AI не е настроен,
+      // картата казва какво липсва, вместо да покаже измислен анализ.
+      status: (cc && cc.ai_available!==false) ? 'Онлайн' : 'Не е настроен',
+      text: (cc && cc.ai_available!==false)
+            ? `<div>${esc(cc.summary)}</div>${(cc.risks||[]).length
               ? `<div class="hint" style="margin-top:8px;">${ic('alert')}<span style="color:var(--warning)">${esc(cc.risks[0])}</span></div>` : ''}`
-            : '<span class="muted">AI анализът не е достъпен в момента.</span>',
+            : `<span class="muted">${esc((cc && cc.ai_note) || 'AI анализът не е достъпен в момента.')}</span>`,
       actions:`<button class="ai sm" onclick="navigate('analytics')">${ic('spark')}Анализирай с AI</button>
                <button class="sm tertiary" onclick="navigate('reports')">Покажи отчетите</button>`,
     })}
@@ -3212,15 +3215,21 @@ async function obPanel(accounts){
   try{ [providers,connections]=await Promise.all([api('/banking/providers'),api('/banking/connections')]); }
   catch(e){ box.innerHTML=`<div class="card">${empty(e.message)}</div>`; return; }
 
+  // Режимът е от бекенда: „off“ значи, че няма доставчик — екранът го казва,
+  // вместо да предложи демо банка с измислени движения.
+  const obOff = providers.mode==='off';
+  const OB_REZHIM = {live:['s-green','свързана'], stub:['s-amber','демо данни'], off:['s-red','не е свързана']};
+  const [obKlas, obEtiket] = OB_REZHIM[providers.mode] || ['s-violet', providers.active||'—'];
   box.innerHTML=`<div class="card" style="margin-bottom:16px;">
     <div class="card-t"><h3>Свързване с банка (PSD2)</h3>
-      <span class="pill s-violet na">${esc(providers.active)}</span></div>
+      <span class="pill ${obKlas} na">${esc(obEtiket)}</span></div>
     <div class="hint" style="margin-bottom:12px;">${esc(providers.note)}
       Съгласието е срочно — при изтичане тегленето спира и системата предупреждава предварително.</div>
-    <div class="row">
+    ${obOff?`<div class="hint">Движенията се внасят с файл (CSV, MT940 или camt.053), докато няма
+      доставчик за автоматично теглене.</div>`:`<div class="row">
       <div class="field grow"><label>Банка</label><select id="ob-inst"><option>зареждане…</option></select></div>
       <button id="ob-start" class="primary" style="align-self:flex-end;">${ic('globe')}Поискай съгласие</button>
-    </div></div>
+    </div>`}</div>
     ${connections.length?`<div class="card"><div class="card-t"><h3>Връзки</h3><span class="pill s-gray na">${connections.length}</span></div>
       <table><thead><tr><th>Банка</th><th>Статус</th><th>Изтича</th><th>Последно теглене</th><th class="num"></th></tr></thead><tbody>
       ${connections.map(c=>`<tr><td class="strong">${esc(c.institution_name||c.institution_id)}</td>
@@ -3234,13 +3243,13 @@ async function obPanel(accounts){
     <div id="ob-detail"></div>`;
 
   const sel=document.getElementById('ob-inst');
-  try{
+  if(sel){ try{
     const list=await api('/banking/institutions?country=BG');
     sel.innerHTML=list.map(i=>`<option value="${esc(i.id)}">${esc(i.name)}</option>`).join('')
       || '<option value="">няма налични банки</option>';
-  }catch(e){ sel.innerHTML=`<option value="">${esc(e.message)}</option>`; }
+  }catch(e){ sel.innerHTML=`<option value="">${esc(e.message)}</option>`; } }
 
-  document.getElementById('ob-start').onclick=async(e)=>{
+  if(!obOff) document.getElementById('ob-start').onclick=async(e)=>{
     const inst=sel.value; if(!inst){ toast('Избери банка',true); return; }
     const b=e.currentTarget; b.disabled=true;
     try{ const c=await api('/banking/connections',{method:'POST',body:{

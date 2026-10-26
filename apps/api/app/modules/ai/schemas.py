@@ -77,3 +77,6 @@ class CommandCenterOut(BaseModel):
     summary: str
     recommendations: list[str] = []
     risks: list[str] = []
+    # Числата горе са от базата и важат винаги; анализът иска настроен AI.
+    ai_available: bool = True
+    ai_note: str = ""

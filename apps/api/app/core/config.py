@@ -15,9 +15,11 @@ DEFAULT_SECRET_KEY = "dev-secret-change-me"
 MIN_SECRET_KEY_BYTES = 32
 # Среди, в които изискваме „истинска“ конфигурация.
 PRODUCTION_ENVIRONMENTS = frozenset({"production", "prod", "staging"})
-# Среди, в които подставени данни за магазините са забранени на всяка цена —
-# дори при изрично `STORE_PROVIDER=stub`. „staging“ НЕ е тук нарочно: демо
-# средата е staging и живее от показни данни.
+# Среди, в които подставени данни са забранени на всяка цена — дори при изрично
+# `STORE_PROVIDER=stub`, `BANK_PROVIDER=stub` или `AI_PROVIDER=stub`. Важи за
+# ВСЕКИ доставчик, не само за магазините: измислените числа изглеждат като
+# счетоводни данни, а в production до тях няма кой да сложи етикет „демо“.
+# „staging“ НЕ е тук нарочно: демо средата е staging и живее от показни данни.
 STUB_FORBIDDEN_ENVIRONMENTS = frozenset({"production", "prod"})
 # Подписваме със споделен таен ключ → само симетрични алгоритми. „none“ никога.
 ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
@@ -94,7 +96,8 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     AI_MODEL: str = "claude-opus-5"
     AI_MAX_TOKENS: int = 8000
-    # auto → anthropic ако има ключ, иначе stub (детерминиран, без мрежа — за dev/тестове).
+    # auto → anthropic ако има ключ, иначе „off“. Подставените отговори искат
+    # изрично AI_PROVIDER=stub и са забранени в production (виж ai_provider).
     AI_PROVIDER: str = "auto"
 
     # ---- Подаване към НАП ----
@@ -138,12 +141,15 @@ class Settings(BaseSettings):
     APPLE_PRIVATE_KEY_PATH: str = ""   # път до AuthKey_XXXX.p8
     APPLE_VENDOR_NUMBER: str = ""      # номер на доставчика (за Sales Reports)
     # Google Play: финансовите отчети се експортират в Google Cloud Storage bucket.
-    # Банки (PSD2 / open banking). Ключовете се четат само от средата (D-009).
-    GOCARDLESS_SECRET_ID: str = ""
-    GOCARDLESS_SECRET_KEY: str = ""
-
     GOOGLE_PLAY_BUCKET: str = ""       # напр. pubsite_prod_..._<developer id>
     GOOGLE_APPLICATION_CREDENTIALS: str = ""  # път до service account JSON
+
+    # ---- Банки (PSD2 / open banking) ----
+    # Ключовете се четат само от средата (D-009).
+    # auto → реалният доставчик ако има credentials, иначе „off“ (не stub).
+    BANK_PROVIDER: str = "auto"
+    GOCARDLESS_SECRET_ID: str = ""
+    GOCARDLESS_SECRET_KEY: str = ""
 
     @property
     def apple_configured(self) -> bool:
@@ -169,19 +175,11 @@ class Settings(BaseSettings):
         носеше 1305 реда измислени продажби на приложения, които не съществуват,
         и те изглеждаха като счетоводни данни.
         """
-        izbran = (self.STORE_PROVIDER or "auto").strip().lower()
-        if izbran == "stub":
-            if self.ENVIRONMENT.strip().lower() in STUB_FORBIDDEN_ENVIRONMENTS:
-                return "off"
-            return "stub"
-        if izbran == "live":
-            return "live"
-        # auto
         konfiguriran = {
             "APP_STORE": self.apple_configured,
             "GOOGLE_PLAY": self.google_play_configured,
         }.get(str(platform).upper(), False)
-        return "live" if konfiguriran else "off"
+        return self._rezhim(self.STORE_PROVIDER, konfiguriran)
 
     @property
     def resolved_store_provider(self) -> str:
@@ -264,10 +262,55 @@ class Settings(BaseSettings):
         return self.DATABASE_URL.startswith("sqlite")
 
     @property
+    def gocardless_configured(self) -> bool:
+        """Банковият доставчик: двата ключа, без които няма токен."""
+        return bool(self.GOCARDLESS_SECRET_ID and self.GOCARDLESS_SECRET_KEY)
+
+    @property
+    def bank_provider(self) -> str:
+        """Режимът за банките: „live“, „stub“ или „off“.
+
+        Беше `live if available else stub`, тоест production без ключове
+        предлагаше „УниКредит Булбанк (демо)“ и наливаше измислени движения по
+        120,50 EUR в истинския дневник. „off“ значи „няма ключове“, а не
+        „покажи измислени движения“.
+        """
+        return self._rezhim(self.BANK_PROVIDER, self.gocardless_configured)
+
+    @property
+    def ai_configured(self) -> bool:
+        """AI: ключът за Anthropic. Чете се само от средата, никъде не се логва."""
+        return bool(self.ANTHROPIC_API_KEY)
+
+    @property
+    def ai_provider(self) -> str:
+        """Режимът за AI: „anthropic“, „stub“ или „off“.
+
+        Подставеният клиент връща измислени стойности за данъчна основа, ДДС и
+        сметка по ЗКПО. Етикетът „(stub)“ в бележката не стига: числата влизат
+        в document_extractions и expense_classifications срещу истински
+        документи. В production няма резервен вариант — има ясна грешка.
+        """
+        return self._rezhim(self.AI_PROVIDER, self.ai_configured, zhivo="anthropic")
+
+    @property
     def resolved_ai_provider(self) -> str:
-        if self.AI_PROVIDER == "auto":
-            return "anthropic" if self.ANTHROPIC_API_KEY else "stub"
-        return self.AI_PROVIDER
+        """Старото име на `ai_provider`; пази съвместимост с извикващия код."""
+        return self.ai_provider
+
+    def _rezhim(self, izbran: str, konfiguriran: bool, zhivo: str = "live") -> str:
+        """Общото правило за всеки доставчик: избраното, но без stub в production."""
+        izbran = (izbran or "auto").strip().lower()
+        if izbran == "stub":
+            if self.ENVIRONMENT.strip().lower() in STUB_FORBIDDEN_ENVIRONMENTS:
+                return "off"
+            return "stub"
+        if izbran == "off":
+            # Изрично изключен доставчик си остава изключен, дори с налични ключове.
+            return "off"
+        if izbran in (zhivo, "live"):
+            return zhivo
+        return zhivo if konfiguriran else "off"
 
     @property
     def is_production(self) -> bool:

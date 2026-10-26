@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.modules.accounting.models import Account, EntryStatus, JournalEntry
 from app.modules.banking.models import (
     ZERO,
@@ -474,18 +475,29 @@ def _as_aware(value):
 
 
 def _connector(code: str | None = None):
-    from app.modules.banking.connectors.factory import get_bank_connector
+    """Конекторът или 409 с указание какво липсва — никога подставен „резервен“."""
+    from app.modules.banking.connectors.factory import BankNotConnected, get_bank_connector
 
-    return get_bank_connector(code)
+    try:
+        return get_bank_connector(code)
+    except BankNotConnected as exc:
+        raise _err(str(exc), status.HTTP_409_CONFLICT) from exc
 
 
 def list_bank_providers() -> dict:
-    """Кои доставчици са налични и кой ще се ползва."""
+    """Кои доставчици са налични и кой ще се ползва.
+
+    Връща и режима, за да може екранът да каже „не е свързана“, вместо да
+    предложи демо банка. Не вдига грешка при липса на ключове: това е
+    справка за състоянието, а не опит да се вземат движения.
+    """
     from app.modules.banking.connectors.factory import available_bank_connectors
 
-    active = _connector()
+    rezhim = settings.bank_provider
+    aktiven = {"live": "GOCARDLESS", "stub": "STUB"}.get(rezhim, "")
     return {
-        "active": active.code,
+        "active": aktiven,
+        "mode": rezhim,
         "providers": [
             {
                 "code": c.code,

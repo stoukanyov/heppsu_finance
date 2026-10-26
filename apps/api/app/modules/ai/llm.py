@@ -3,7 +3,9 @@
 Две имплементации:
 - AnthropicLLMClient — реален достъп до Claude (модел по подразбиране claude-opus-5),
   ползван, когато има ANTHROPIC_API_KEY.
-- StubLLMClient — детерминиран, без мрежа; ползван в тестове и dev без ключ.
+- StubLLMClient — детерминиран, без мрежа; само при изрично AI_PROVIDER=stub
+  (тестове и dev). Без ключ и без изричен stub модулът вдига AiNotConfigured —
+  в production измислените стойности са забранени.
 
 Структурираният изход се получава чрез принудително извикване на инструмент
 (tool_choice) — устойчиво между версии на SDK. Ключът се чете от средата; кодът
@@ -301,7 +303,26 @@ class StubLLMClient:
         }
 
 
+class AiNotConfigured(RuntimeError):
+    """Няма AI доставчик — не връщаме измислени стойности вместо това.
+
+    Подставеният клиент дава данъчна основа, ДДС, сметка по ЗКПО и право на
+    данъчен кредит, изчислени от нищо. Бележката „(stub)“ не стига: числата се
+    пазят в document_extractions и expense_classifications срещу истински
+    документи и после изглеждат като разпознати.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "AI не е настроен. За разпознаване на документи и анализ задай в средата: "
+            "ANTHROPIC_API_KEY. Дотогава полетата се въвеждат ръчно."
+        )
+
+
 def get_llm_client() -> LLMClient:
-    if settings.resolved_ai_provider == "anthropic":
+    rezhim = settings.ai_provider
+    if rezhim == "anthropic":
         return AnthropicLLMClient(settings.ANTHROPIC_API_KEY, settings.AI_MODEL, settings.AI_MAX_TOKENS)
-    return StubLLMClient()
+    if rezhim == "stub":
+        return StubLLMClient()
+    raise AiNotConfigured()

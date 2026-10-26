@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.modules.accounting.models import AccountType, EntryStatus, JournalEntry
-from app.modules.ai.llm import get_llm_client
+from app.modules.ai.llm import AiNotConfigured, get_llm_client
 from app.modules.ai.models import DocumentExtraction
 from app.modules.ai.schemas import CfoAnswer, CommandCenterOut, PostingProposalOut
 from app.modules.companies.models import Company
@@ -77,19 +77,32 @@ def financial_snapshot(
     }
 
 
+def _llm():
+    """LLM клиентът или 409 с указание какво липсва — никога подставен."""
+    try:
+        return get_llm_client()
+    except AiNotConfigured as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+
+
+def _ime_na_modela() -> str:
+    """Какво се записва в полето `model` — истинският модел или „stub“."""
+    return settings.AI_MODEL if settings.ai_provider == "anthropic" else "stub"
+
+
 def extract_document(
     db: Session, company: Company, user_id: uuid.UUID, doc_id: uuid.UUID
 ) -> DocumentExtraction:
     doc = documents_service.get_document(db, company.id, doc_id)
     content = documents_storage.read_file(doc.storage_path)
 
-    llm = get_llm_client()
+    llm = _llm()
     data = llm.extract_document(content, doc.content_type, doc.original_filename)
 
     extraction = DocumentExtraction(
         company_id=company.id,
         document_id=doc.id,
-        model=settings.AI_MODEL if settings.resolved_ai_provider == "anthropic" else "stub",
+        model=_ime_na_modela(),
         data=data,
         created_by_id=user_id,
     )
@@ -349,7 +362,7 @@ def cfo_analysis(
     date_from, date_to = _resolve_period_range(db, company.id, period_id)
     snapshot = financial_snapshot(db, company, date_from, date_to)
 
-    llm = get_llm_client()
+    llm = _llm()
     result = llm.financial_analysis(snapshot, question)
 
     return CfoAnswer(
@@ -371,11 +384,17 @@ def command_center(db: Session, company: Company) -> CommandCenterOut:
         .where(Document.company_id == company.id, Document.status.in_(_PENDING_STATUSES))
     ) or 0
 
-    llm = get_llm_client()
-    analysis = llm.financial_analysis(
-        {**snapshot, "pending_documents": pending},
-        "Направи кратък преглед на финансовото състояние и посочи приоритетни действия и рискове.",
-    )
+    # Числата идват от базата и са верни без AI. Ако AI липсва, екранът показва
+    # числата и казва защо няма анализ — вместо да пази мълчание или да го измисли.
+    try:
+        analysis = get_llm_client().financial_analysis(
+            {**snapshot, "pending_documents": pending},
+            "Направи кратък преглед на финансовото състояние и посочи приоритетни действия и рискове.",
+        )
+        ai_note = ""
+    except AiNotConfigured as exc:
+        analysis = {}
+        ai_note = str(exc)
 
     return CommandCenterOut(
         company_name=company.name,
@@ -390,4 +409,6 @@ def command_center(db: Session, company: Company) -> CommandCenterOut:
         summary=analysis.get("summary", ""),
         recommendations=analysis.get("recommendations", []),
         risks=analysis.get("risks", []),
+        ai_available=not ai_note,
+        ai_note=ai_note,
     )
