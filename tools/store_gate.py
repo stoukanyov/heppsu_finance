@@ -1,0 +1,518 @@
+#!/usr/bin/env python3
+"""Механичните правила на магазините, проверени върху репото ПРЕДИ билд.
+
+Всеки ред тук е отказ, който вече сме получили (docs/STORE-REJECTIONS.md):
+A4 purpose strings по езици, A6/M4 цената и trial-ът, A8/M2 „Google Play"
+в iOS низ и имена на платформи в правните текстове, M3 правните връзки, M1 подаването. Правило, което живее само в
+документ, се нарушава дни по-късно (виж feedback-pravilo-bez-mehanizam);
+затова е скрипт, който пада.
+
+    python3 tools/store_gate.py /path/to/flutter/repo [--online]
+
+Печата OK|NO|ASK<TAB>какво<TAB>подробност; излиза с 1 при NO.
+Не заменя чеклиста: демо акаунти, sandbox покупка, 5 резолюции, RTDN и
+подаването с 3 елемента ги проверява човек/ASC API (review_gate.py).
+"""
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+import urllib.request
+from pathlib import Path
+
+PRICE = re.compile(r"\d[.,]\d\d ?(EUR|€|USD|\$|£|лв)|(EUR|€|USD|\$|£) ?\d")
+CYRILLIC = re.compile(r"[Ѐ-ӿ]+")
+CYRILLIC_LANGS = {"bg", "ru", "uk", "sr", "mk", "be"}
+AUTO_CHARGE = re.compile(
+    r"automat|charged|renew|таксува|abgebucht|cobra|prélev|terhel|addebit|pobier|încas|cobrado",
+    re.I,
+)
+PLATFORM_KEY = re.compile(r"google|play|android|apple|ios|store", re.I)
+#: Имена на платформи. Apple 2.3.10 ги забранява „in your app or metadata“, а
+#: правните страници са и двете: отварят се от приложението и от описанието.
+PLATFORM_NAME = re.compile(r"\b(iOS|iPadOS|Android|iPhone|iPad|Wear OS)\b")
+STORE_NAME = re.compile(r"App Store|Google Play|Play Store")
+
+rows: list[tuple[str, str, str]] = []
+
+
+def ok(what, detail=""):
+    rows.append(("OK", what, detail))
+
+
+def no(what, detail=""):
+    rows.append(("NO", what, detail))
+
+
+def ask(what, detail=""):
+    rows.append(("ASK", what, detail))
+
+
+def _url_variants(url: str, dart: str) -> list[str] | None:
+    """Адресите, които този низ може да стане наистина.
+
+    Dart низовете носят интерполация: `beagle-owner-terms$suffix.html`. Докато
+    гейтът ги отваряше буквално, със `$suffix` вътре, той връщаше 404 и го
+    показваше като червен ред — за адрес, който на живо е съвсем здрав
+    (03.10.2026). Фалшивото червено е по-скъпо от липсващата проверка: то учи
+    човека да подминава червените редове.
+
+    Променливата се разписва от дефиницията ѝ в същия код, когато тя е
+    `switch` с низови отговори — точно случаят на `suffix` (.bg, .pt, „").
+    Не може ли да се разпише, функцията връща None и редът става ASK.
+    """
+    if "$" not in url:
+        return [url]
+    m = re.search(r"\$\{?(\w+)\}?", url)
+    if not m:
+        return None
+    block = re.search(rf"\b{m.group(1)}\s*=\s*switch\s*\([^)]*\)\s*\{{(.*?)\}};", dart, re.S)
+    if not block:
+        return None
+    arms = set(re.findall(r"=>\s*'([^']*)'", block.group(1)))
+    if not arms:
+        return None
+    out: list[str] = []
+    for arm in arms:
+        deeper = _url_variants(url[: m.start()] + arm + url[m.end():], dart)
+        if deeper is None:
+            return None
+        out.extend(deeper)
+    return out
+
+
+def arb_dirs(repo: Path) -> list[str]:
+    """Къде са ARB файловете: l10n.yaml казва, не предположението.
+
+    Beagle Owner ги държи в lib/l10n, Construction Calculator - в l10n/ на
+    корена (`arb-dir: l10n`). Гейт, който гледа само lib/**, казва „няма
+    ARB" на напълно локализирано приложение и пропуска проверките за цена,
+    „Google Play" и кирилица - точно онова, за което съществува.
+    """
+    cfg = repo / "l10n.yaml"
+    if cfg.exists():
+        m = re.search(r"^arb-dir:\s*(\S+)", cfg.read_text(encoding="utf-8"), re.M)
+        if m:
+            return [f"{m.group(1).strip().rstrip('/')}/**/*.arb"]
+    return ["lib/**/*.arb", "l10n/**/*.arb"]
+
+
+def arb_files(repo: Path) -> dict[str, dict]:
+    out = {}
+    found = [f for pat in arb_dirs(repo) for f in repo.glob(pat)]
+    for f in sorted(found):
+        m = re.search(r"_([a-z]{2,3})(?:_[A-Z]{2})?\.arb$", f.name)
+        if not m:
+            continue
+        try:
+            out[m.group(1)] = {k: v for k, v in json.loads(f.read_text(encoding="utf-8")).items()
+                               if not k.startswith("@") and isinstance(v, str)}
+        except json.JSONDecodeError as exc:
+            no("ARB се чете", f"{f}: {exc}")
+    return out
+
+
+def check_arb(repo: Path, arbs: dict[str, dict]) -> None:
+    if not arbs:
+        ask("ARB файлове", f"няма ARB в {', '.join(arb_dirs(repo))} — приложението не е локализирано през ARB?")
+        return
+    ok("езици в ARB", ", ".join(sorted(arbs)))
+
+    # A6/M4: никаква написана цена.
+    hits = [f"{lang}:{k}" for lang, a in arbs.items() for k, v in a.items() if PRICE.search(v)]
+    (no if hits else ok)("написана цена в ARB", ", ".join(hits[:6]) or "няма")
+
+    # A8/M2: един низ за двата магазина.
+    both = [f"{lang}:{k}" for lang, a in arbs.items() for k, v in a.items()
+            if "App Store" in v and "Google Play" in v]
+    (no if both else ok)("„App Store“ и „Google Play“ в един низ", ", ".join(both[:6]) or "няма")
+    loose = [f"{lang}:{k}" for lang, a in arbs.items() for k, v in a.items()
+             if ("Google Play" in v or "App Store" in v) and not PLATFORM_KEY.search(k)]
+    if loose:
+        ask("магазин по име в общ низ", f"ключът не подсказва платформа: {', '.join(loose[:6])} — идва ли през {{store}}?")
+
+    # M4: trial изречение — колко трае, сумата, автоматично.
+    trial = [f"{lang}:{k}" for lang, a in arbs.items() for k, v in a.items()
+             if "{price}" in v and AUTO_CHARGE.search(v)]
+    # „free“ само по себе си не е пробен период: безплатно приложение пише
+    # „free, and staying free“ и няма какво да таксува после. Правилото важи
+    # за текст, който наистина обещава пробен период.
+    TRIAL_WORDS = re.compile(r"free trial|trial|days free|пробен период|безплатен период", re.I)
+    if any(TRIAL_WORDS.search(v) for a in arbs.values() for v in a.values()):
+        (ok if trial else no)("trial: сума + „автоматично“ в едно изречение",
+                              f"{len(trial)} низа с {{price}} и обяснение" if trial else "има trial текст, но нито един низ с {price} и „charged automatically/renews“")
+    else:
+        ok("trial изречение", "няма trial в текстовете")
+
+    # A4: кирилица извън кирилските езици.
+    cyr = [f"{lang}:{k}" for lang, a in arbs.items() if lang not in CYRILLIC_LANGS
+           for k, v in a.items() if CYRILLIC.search(v)]
+    (no if cyr else ok)("кирилица извън bg/ru/uk/sr", ", ".join(cyr[:6]) or "няма")
+
+
+#: Как изглежда „проверка за абонамент" в клиентски Dart код.
+# `plus.has(...)` и `PlusFeatures.` са наименуванията на My Concert Buddy,
+# `isPro`, `ProAction.` и `AppFeature.` — на My Life Within (01.10.2026:
+# гейтът светеше червено на приложение, в което абонаментът ЗАКЛЮЧВА доклада
+# за лекаря, картата на болката и износа — просто с други имена);
+# добавени са тук, а не преименувани там, защото правилото е „абонаментът
+# отключва нещо“, не „кръсти го isPlus“. Изразите са тесни нарочно: голо
+# `has(` би матчнало всеки речник.
+_ENTITLEMENT_USE = re.compile(
+    r"\b(isPlus|isPro|isSubscribed|hasSubscription|entitlement\.entitled|SubscriptionRequired)\b"
+    r"|\bplus\.has\(|\bPlusFeatures\.|\bProAction\.|\bAppFeature\."
+)
+#: Файловете, които САМИ пресмятат абонамента — там употребата не е гейт.
+_BILLING_FILE = re.compile(r"(billing|entitlement|subscription|purchase|store_gateway)[^/]*\.dart$")
+
+
+def _check_subscription_unlocks_something(sources: list[Path]) -> None:
+    """Абонамент, който не отключва нищо, е отказ и измама едновременно.
+
+    App Review проверява точно това („what does the subscription unlock?"), а
+    човекът плаща за услуга без услуга. Dog Journey стоеше така до 25.09.2026:
+    `isPlus` беше пресметнат правилно и не се ползваше никъде — глутницата,
+    споделянето с ветеринар и облачното копие бяха достъпни и без плащане, а
+    описанието в магазина ги изброяваше като ползи на Plus.
+
+    Признакът е употреба на състоянието ИЗВЪН слоя, който го пресмята: екран,
+    който показва врата, или заявка, която го проверява. Употреба само в
+    `billing_controller.dart` значи „пресметнато, но неизползвано".
+    """
+    users = sorted(
+        {
+            p.name
+            for p in sources
+            if not _BILLING_FILE.search(p.as_posix()) and _ENTITLEMENT_USE.search(p.read_text(encoding="utf-8", errors="ignore"))
+        }
+    )
+    (ok if users else no)(
+        "абонаментът отключва нещо",
+        ", ".join(users[:4]) if users else "състоянието на абонамента не се ползва никъде извън билинга",
+    )
+
+
+def _workspace_packages(repo: Path) -> list[Path]:
+    """Пакетите на същото хранилище, от които това приложение зависи по път.
+
+    Чете `dependencies:` с `path:` от pubspec.yaml — без да внася yaml
+    библиотека заради три реда. Връща само съществуващи папки ВЪТРЕ в
+    хранилището; чужд път (например пакет от pub кеша) не е наш код.
+    """
+    pubspec = repo / "pubspec.yaml"
+    if not pubspec.exists():
+        return []
+    found: list[Path] = []
+    for match in re.finditer(r"^\s*path:\s*(\S+)\s*$", pubspec.read_text(encoding="utf-8"), re.MULTILINE):
+        candidate = (repo / match.group(1)).resolve()
+        if candidate.is_dir() and candidate != repo.resolve():
+            found.append(candidate)
+    return found
+
+
+def check_links(repo: Path, online: bool) -> None:
+    # Генерираните преводи не са код: там думата „абонамент" е текст за
+    # потребителя („плащаш веднъж, без абонамент"), не продукт.
+    sources = [p for p in repo.glob("lib/**/*.dart") if "l10n/generated" not in p.as_posix()]
+    # Кодът на приложението не е само в неговата `lib/`: в pub workspace
+    # (Dog Journey) идентификаторите на продуктите и целият общ слой живеят в
+    # съседен пакет. Без него гейтът обяви абонамента за еднократна покупка и
+    # пропусна проверката за връзка към отказване (25.09.2026).
+    sources += [
+        p
+        for local in _workspace_packages(repo)
+        for p in local.glob("lib/**/*.dart")
+        if "l10n/generated" not in p.as_posix()
+    ]
+    dart = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in sources)
+    urls = set(re.findall(r"https://[^\s'\"]+(?:privacy|terms|policy|legal)[^\s'\"]*", dart))
+    # Dog Journey строи връзката от базата на средата: '${base}/legal/privacy/$lang'
+    # (legal_links.dart) — пътят е доказателството, не буквалният https.
+    urls |= set(re.findall(r"/legal/(?:privacy|terms)[^\s'\"]*", dart))
+    privacy = [u for u in urls if "privacy" in u or "policy" in u]
+    terms = [u for u in urls if "terms" in u or ("legal" in u and "privacy" not in u)]
+    (ok if privacy else no)("политика за поверителност в кода", ", ".join(privacy) or "няма https://…privacy… в lib/")
+    (ok if terms else no)("условия за ползване в кода", ", ".join(terms) or "няма https://…terms… в lib/ (Apple 3.1.2(c), M3)")
+    uses_launcher = "url_launcher" in (repo / "pubspec.yaml").read_text(encoding="utf-8")
+    (ok if uses_launcher else no)("връзките се натискат (url_launcher)", "" if uses_launcher else "адрес като текст не е „functional link“ (M4)")
+    manage = re.search(r"apps\.apple\.com/account/subscriptions|play\.google\.com/store/account/subscriptions", dart)
+    has_iap = "in_app_purchase" in (repo / "pubspec.yaml").read_text(encoding="utf-8")
+    # Правилото за „достъп до отказване" е на абонаментите. Приложение само с
+    # еднократни покупки (non-consumable) няма какво да се отказва - искането
+    # на такава връзка там е измислен отказ, не предпазна мярка.
+    # Признак за абонамент е API-то за абонаменти, не думата: `StreamSubscription`
+    # е поток, а „без абонамент" в текст е точно обратното на абонамент.
+    sells_subscription = bool(re.search(
+        r"autoRenew|subscriptionPeriod|SubscriptionOffer|ProductType\.subs"
+        r"|productId\s*[:=]\s*'[^']*(monthly|yearly|annual)"
+        # Идентификаторът на продукта невинаги стои до думата `productId`:
+        # Dog Journey го държи в таблица `'plus_monthly': 'com.…plus.monthly'`
+        # и гейтът го обяви за еднократна покупка, тоест пропусна проверката
+        # за връзка към отказване (намерено на 25.09.2026). Признакът е самият
+        # низ, който изглежда като продукт с период.
+        r"|'[\w.]*[._](monthly|yearly|annual)'",
+        dart))
+    if has_iap and sells_subscription:
+        (ok if manage else no)("връзка за управление/спиране на абонамента",
+                               "" if manage else "Play policy: direct access to cancellation → Subscription Center")
+        _check_subscription_unlocks_something(sources)
+    elif has_iap:
+        ok("покупки", "еднократни (non-consumable) — правилото за отказване на абонамент не важи")
+    if online:
+        for u in sorted(urls):
+            if not u.startswith("http"):
+                # `/legal/privacy/${_language(context)}` се сглобява с базата от
+                # --dart-define и в production сочи към нашия бекенд. Като низ не
+                # е адрес; curl връщаше 0 и гейтът го обявяваше за счупен.
+                ask(f"адресът се сглобява в кода: {u}", "относителен път — проверява се срещу живия бекенд, не оттук")
+                continue
+            variants = _url_variants(u, dart)
+            if variants is None:
+                ask(f"адресът се сглобява в кода: {u}", "не можах да разпиша променливата — провери го ръчно")
+                continue
+            # curl, не urllib: python на тази машина няма CA пакет и пада с
+            # CERTIFICATE_VERIFY_FAILED (виж reference-control-center-backlog).
+            import subprocess
+            for v in sorted(variants):
+                code = subprocess.run(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", v],
+                                      capture_output=True, text=True).stdout.strip()
+                code = int(code) if code.isdigit() else code
+                (ok if code == 200 else no)(f"отваря се {v}", str(code))
+
+
+def check_plist(repo: Path, arbs: dict[str, dict]) -> None:
+    plist = repo / "ios/Runner/Info.plist"
+    if not plist.exists():
+        ask("Info.plist", "няма ios/Runner/Info.plist")
+        return
+    text = plist.read_text(encoding="utf-8")
+    keys = re.findall(r"<key>(NS\w+UsageDescription)</key>", text)
+    lprojs = sorted(repo.glob("ios/Runner/*.lproj/InfoPlist.strings"))
+    if not keys:
+        ok("purpose strings", "няма NS*UsageDescription — приложението не иска разрешения")
+        return
+    if not lprojs:
+        no("purpose strings по езици", f"{len(keys)} ключа, но нито един *.lproj/InfoPlist.strings (A4)")
+        return
+    missing = [f"{p.parent.name}:{k}" for p in lprojs for k in keys
+               if k not in p.read_text(encoding="utf-8", errors="ignore")]
+    (no if missing else ok)("purpose strings по езици", ", ".join(missing[:8]) or f"{len(keys)} ключа × {len(lprojs)} езика")
+    declared = set(re.findall(r"<string>([a-z]{2,3})</string>", text.split("CFBundleLocalizations")[1].split("</array>")[0])) if "CFBundleLocalizations" in text else set()
+    undeclared = sorted({p.parent.name.split(".")[0] for p in lprojs} - declared)
+    (no if undeclared else ok)("CFBundleLocalizations изброява lproj езиците",
+                               ", ".join(undeclared) + " липсват — iOS няма да покаже превода" if undeclared else f"{len(declared)} езика")
+    want = {l for l in arbs} - {"en"}
+    have = {p.parent.name.split(".")[0].split("-")[0] for p in lprojs}
+    gap = sorted(want - have - {"bg"} if "bg" not in have else want - have)
+    if gap:
+        ask("езици на purpose strings", f"ARB има {", ".join(gap)}, InfoPlist.strings няма")
+
+
+def check_notes(repo: Path) -> None:
+    """Бележките за ревюъра: дължина и как се говори за AI.
+
+    M5 (24.09.2026): „no AI service“ в списък с липси донесе 2.1 и въпроси.
+    Темата или не се отваря, или се затваря докрай.
+    """
+    files = list(repo.glob("docs/store-assets/apple-review/review-notes.txt")) + \
+        list(repo.glob("store/apple-review/review-notes.txt"))
+    if not files:
+        ask("бележки за ревюъра", "няма review-notes.txt")
+        return
+    text = files[0].read_text(encoding="utf-8")
+    (no if len(text) > 4000 else ok)("бележки ≤ 4000 знака", str(len(text)))
+    mentions_ai = re.search(r"\bAI\b|artificial intelligence|machine learning", text)
+    if mentions_ai:
+        answered = re.search(r"NO artificial intelligence|no artificial intelligence or machine learning", text)
+        (ok if answered else no)("бележките обясняват AI, не само го отричат в списък",
+                                 "" if answered else "„AI“ се споменава мимоходом — M5: това носи 2.1 с три въпроса")
+
+
+def check_store_text(repo: Path) -> None:
+    files = sorted(repo.glob("tool/store_text/*.json")) + sorted(repo.glob("store/text/*.json"))
+    if not files:
+        ask("описания за магазините", "няма tool/store_text/*.json — описанията се пишат на ръка?")
+        return
+    for f in files:
+        t = json.loads(f.read_text(encoding="utf-8"))
+        desc = str(t.get("description", "")).replace("{price}", str(t.get("price_line", "")))
+        blob = " ".join(str(v) for v in t.values() if isinstance(v, str)) + desc
+        if PRICE.search(blob):
+            no("написана цена в описанието", f.name)
+        if not re.search(r"https://\S+(terms|privacy)", desc):
+            no("правна връзка в описанието", f"{f.name}: няма https://…terms/privacy (M3, A5)")
+        # A4, но в описанието: чужда азбука издава копи-пейст от друг език.
+        # Намерено на живо в японското описание на Calctera (25.09.2026).
+        lang = str(t.get("language", f.stem))
+        if lang not in CYRILLIC_LANGS and CYRILLIC.search(blob):
+            no("кирилица в чуждоезично описание",
+               f"{f.name}: {', '.join(sorted(set(CYRILLIC.findall(blob)))[:3])}")
+        # Дължини, които магазините отрязват мълчаливо.
+        for field, limit in (("title", 30), ("short_description", 80), ("description", 4000)):
+            if field in t and len(str(t[field])) > limit:
+                no(f"{field} ≤ {limit}", f"{f.name}: {len(str(t[field]))}")
+    if not any(r[0] == "NO" and "описанието" in r[1] for r in rows):
+        ok("описания за магазините", f"{len(files)} езика: без цени, с правна връзка")
+
+
+def legal_sources(repo: Path) -> list[Path]:
+    """Изворите на публикуваните правни страници (Политика, Условия, изтриване).
+
+    Отговорите за въпросниците на магазините и README не се публикуват.
+    """
+    # My Life Within ги държи като docs/terms-of-use*.md и docs/privacy-policy*.md
+    # (находка на сесията му, 11.10.2026) — затова по име, не само по папка.
+    patterns = ("docs/legal/**/*.md", "legal/**/*.md", "docs/**/*privacy*.md", "docs/**/*terms*.md",
+                "docs/**/*delete-account*.md")
+    found = {f for pat in patterns for f in repo.glob(pat)}
+    return sorted(f for f in found if "answers" not in f.name and f.name != "README.md")
+
+
+def check_legal_platform_names(repo: Path) -> None:
+    """A8/M2 в правните текстове (11.10.2026).
+
+    Ред „платформата (iOS или Android)“ влезе в Политиката на Beagle Owner и
+    Ив го спря преди публикуване: Политиката е свързана от приложението и от
+    описанието в App Store — метаданни по 2.3.10. Пише се „операционната
+    система на устройството“, без имена.
+
+    Магазин по име е ASK, не NO: Условията казват как се спира абонаментът,
+    а това по 3.1.2 е задължително; всяко такова място се гледа от човек.
+    """
+    files = legal_sources(repo)
+    if not files:
+        return
+    platform = [f"{f.name}: {', '.join(sorted(set(PLATFORM_NAME.findall(f.read_text(encoding='utf-8')))))}"
+                for f in files if PLATFORM_NAME.search(f.read_text(encoding="utf-8"))]
+    (no if platform else ok)("име на платформа в правните текстове (2.3.10)",
+                             "; ".join(platform[:6]) or f"{len(files)} файла, без iOS/Android/iPhone")
+    # A6/3.1.2(c): Условията на Beagle Owner казваха „0,99 €“ на 18 езика (12.10.2026).
+    priced = [f.name for f in files if PRICE.search(f.read_text(encoding="utf-8"))]
+    (no if priced else ok)("написана цена в правните текстове", ", ".join(priced[:6]) or "няма")
+    stores = [f.name for f in files if STORE_NAME.search(f.read_text(encoding="utf-8"))]
+    if stores:
+        ask("магазин по име в правните текстове",
+            f"{', '.join(stores[:6])}{' …' if len(stores) > 6 else ''} — само там, където казваш как се "
+            "спира абонаментът (3.1.2); никъде другаде")
+
+
+#: `version: 1.2.8+81` в pubspec.yaml.
+_VERSION_LINE = re.compile(r"^version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)\s*$", re.MULTILINE)
+
+
+def _version_of(text: str) -> tuple[tuple[int, int, int], int] | None:
+    m = _VERSION_LINE.search(text)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))), int(m.group(4))
+
+
+def check_version(repo: Path, allow_same_version: bool) -> None:
+    """Версията на продукта расте заедно с билда.
+
+    Ив, 06.09.2026: „версията трябва да отразява какво реално е фиксирано или
+    добавено, не просто build номера отзад". Правилото стоеше записано, а
+    механизъм нямаше — и Beagle Owner излезе два пъти подред с вдигнат само
+    билд: 1.2.8+79 → +80 (поправка по Apple 2.3.10) и +80 → +81 (поправка на
+    trial изречението). Живото приложение носи две поправки, които би трябвало
+    да личат като 1.2.9 и 1.2.10.
+
+    Проверката е спрямо ПРЕДИШНАТА стойност в git историята на pubspec.yaml,
+    затова работи офлайн и не зависи от магазина.
+
+    Законното изключение е едно: предишният билд изобщо не е стигнал до
+    магазина (паднал при качване, сгрешен подпис, спрян преди Resubmit) — там
+    същата версия с нов билд е вярна. Тогава се подава `--same-version-ok` и
+    решението остава в историята на командата, вместо да се промъкне тихо.
+    """
+    pubspec = repo / "pubspec.yaml"
+    current = _version_of(pubspec.read_text(encoding="utf-8"))
+    if current is None:
+        ask("версия", "pubspec.yaml няма ред `version: X.Y.Z+B`")
+        return
+    previous = None
+    try:
+        # Първо комитнатото състояние: когато версията е вдигната в работното
+        # дърво (обичайният случай преди билд), сравнението е точно с него.
+        # `git show HEAD:<път>` чете пътя ОТ КОРЕНА на хранилището, а
+        # приложението може да е в подпапка (pub workspace: apps/universal).
+        # Без префикса тук се четеше pubspec.yaml на workspace-а — чужд файл с
+        # чужда версия.
+        prefix = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--show-prefix"],
+            capture_output=True, text=True, timeout=20,
+        ).stdout.strip()
+        head = subprocess.run(
+            ["git", "-C", str(repo), "show", f"HEAD:{prefix}pubspec.yaml"],
+            capture_output=True, text=True, timeout=20,
+        )
+        if head.returncode == 0:
+            committed = _version_of(head.stdout)
+            if committed and committed != current:
+                previous = committed
+        if previous is None:
+            # Версията в дървото вече е комитната — тогава „предишната" е
+            # последната различна стойност в историята на файла.
+            log = subprocess.run(
+                ["git", "-C", str(repo), "log", "-p", "--format=%H", "-20", "--", "pubspec.yaml"],
+                capture_output=True, text=True, timeout=20,
+            ).stdout
+            for line in log.splitlines():
+                if line.startswith("-version:"):
+                    candidate = _version_of(line.replace("-version:", "version:", 1))
+                    if candidate and candidate != current:
+                        previous = candidate
+                        break
+    except (OSError, subprocess.SubprocessError):
+        previous = None
+    if previous is None:
+        ok("версия", f"{current[0][0]}.{current[0][1]}.{current[0][2]}+{current[1]} (няма предишна за сравнение)")
+        return
+
+    shown = f"{previous[0][0]}.{previous[0][1]}.{previous[0][2]}+{previous[1]} → " \
+            f"{current[0][0]}.{current[0][1]}.{current[0][2]}+{current[1]}"
+    if current[1] == previous[1]:
+        # Същият билд, различна версия: това е преномериране ПРЕДИ строенето,
+        # не нов билд. Няма какво да се пази — правилото е за билдовете.
+        ok("версия", f"{shown} — същият билд, преномериране преди строене")
+    elif current[0] > previous[0]:
+        ok("версия расте с билда", shown)
+    elif current[0] < previous[0]:
+        no("версия расте с билда",
+           f"{shown}: версията НАМАЛЯВА при нов билд. Магазините не приемат по-малък "
+           f"номер от вече качения")
+    elif allow_same_version:
+        ask("версия", f"{shown} — същата версия, позволено изрично (--same-version-ok)")
+    else:
+        no("версия расте с билда",
+           f"{shown}: вдигнат е само билдът. Поправка → PATCH, нова функция → MINOR. "
+           f"Ако предишният билд НЕ е стигнал до магазина, повтори с --same-version-ok")
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print(__doc__)
+        return 2
+    repo = Path(sys.argv[1]).resolve()
+    online = "--online" in sys.argv
+    allow_same_version = "--same-version-ok" in sys.argv
+    if not (repo / "pubspec.yaml").exists():
+        print(f"NO\tрепо\t{repo} няма pubspec.yaml")
+        return 1
+    arbs = arb_files(repo)
+    check_version(repo, allow_same_version)
+    check_arb(repo, arbs)
+    check_links(repo, online)
+    check_plist(repo, arbs)
+    check_store_text(repo)
+    check_legal_platform_names(repo)
+    check_notes(repo)
+    for state, what, detail in rows:
+        print(f"{state}\t{what}\t{detail}")
+    return 1 if any(r[0] == "NO" for r in rows) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
