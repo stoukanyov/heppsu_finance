@@ -444,20 +444,12 @@ done
 
 if [ "$HEALTHY" = 0 ]; then
     printf '\n\033[1;31m✗ приложението не отговаря — връщам предишната версия\033[0m\n' >&2
-    ssh "$HOST" PROJECT="$PROJECT" REMOTE_DIR="$REMOTE_DIR" bash -euo pipefail <<'REMOTE' >&2 || true
-cd "$REMOTE_DIR"
-dc() { docker compose -p "$PROJECT" -f release/infra/docker-compose.yml \
-       --project-directory . --env-file .env "$@"; }
-dc logs --tail 60 api migrate || true
-if [ -d release.old ] && docker image inspect "aifos-api:${PROJECT}-previous" >/dev/null 2>&1; then
-    echo "ВРЪЩАМ предишната версия"
-    rm -rf release.failed && mv release release.failed && mv release.old release
-    docker tag "aifos-api:${PROJECT}-previous" "aifos-api:${PROJECT}"
-    AIFOS_IMAGE="aifos-api:${PROJECT}" dc up -d --no-build
-    echo "ВНИМАНИЕ: базата НЕ е върната назад. Ако миграцията е минала, "
-    echo "възстанови от backups/pre-deploy-*.sql.gz преди да пуснеш стария код."
-fi
-REMOTE
+    # Самото връщане е в отделен файл, за да може да се тества локално
+    # (apps/api/tests/test_infra_rollback.py). Като heredoc вътре тук то не
+    # се проверяваше от нищо и две повреди в него оцеляха до деня, в който
+    # свалиха production.
+    ssh "$HOST" PROJECT="$PROJECT" REMOTE_DIR="$REMOTE_DIR" bash -s \
+        < "${REPO_ROOT}/infra/rollback.sh" >&2 || true
     die "деплоят се провали"
 fi
 
