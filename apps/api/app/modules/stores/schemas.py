@@ -12,9 +12,10 @@ class SyncResult(BaseModel):
     platform: StorePlatform
     date_from: dt.date
     date_to: dt.date
-    fetched: int
-    imported: int
-    duplicates: int
+    fetched: int        # редове в отчета на магазина (преди събирането по ключ)
+    imported: int       # нови редове
+    updated: int = 0    # съществуващи редове с променени числа (магазинът е коригирал отчета)
+    duplicates: int     # съществуващи редове без промяна
     total_proceeds: Decimal
 
 

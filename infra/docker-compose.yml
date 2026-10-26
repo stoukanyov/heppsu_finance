@@ -15,6 +15,7 @@
 # Подредба на средата:
 #   /srv/aifos/<env>/
 #     ├── .env        тайни (600) — извън release/, за да преживее rsync --delete
+#     ├── secrets/    ключове към магазините (700): .p8 за Apple, JSON за Google
 #     ├── release/    кодът, разархивиран от git таг (никога от работна директория)
 #     ├── storage/    оригиналните сканирани документи
 #     └── backups/    дъмпове на базата
@@ -83,6 +84,11 @@ services:
       # Оригиналните сканирани документи живеят на хоста, за да преживеят
       # пресъздаване на контейнера.
       - ./storage:/app/storage
+      # Ключовете към магазините: `AuthKey_*.p8` за App Store Connect и service
+      # account JSON за кофата с отчетите на Google Play. Като .env стоят ИЗВЪН
+      # release/, за да преживеят `rsync --delete` при деплой, и се монтират само
+      # за четене. Пътищата в .env сочат тук (/app/secrets/...).
+      - ./secrets:/app/secrets:ro
     depends_on:
       db: {condition: service_healthy}
       migrate: {condition: service_completed_successfully}

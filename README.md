@@ -128,6 +128,68 @@ alembic revision --autogenerate -m "описание"   # нова миграц�
 `GET /offers/{id}/copy` (заготовка без клиент и дати) · `GET /offers/{id}/pdf` ·
 `POST /offers/preview`. Права: `offers.view` и `offers.manage`.
 
+## Магазини (App Store / Google Play)
+
+Модулът чете **отчетите на магазините** и ги нормализира в един модел
+(`store_sales`), за да се анализират заедно: приходи по приложение, по държава,
+по месец и App Store срещу Google Play.
+
+**Режимът е на магазин, не общ.** `settings.store_provider_for("APP_STORE")`
+връща `live`, `stub` или `off`. Беше една стойност за двата магазина — и
+`live if (has_apple or has_google)` пращаше синхронизирането на Google Play към
+реалния конектор само защото Apple има ключ.
+
+**`auto` никога не връща `stub`.** Липсващите ключове дават `off` и
+синхронизирането отказва с **409** и текст какво да се зададе. Подставените
+данни искат изричен `STORE_PROVIDER=stub` и са забранени в `production`/`prod`
+на всяка цена (`STUB_FORBIDDEN_ENVIRONMENTS`). Причината е записана: на
+26.10.2026 production носеше **1305 реда измислени продажби** на приложения,
+които не съществуват (`com.heppsu.invoice`, `com.heppsu.pro`,
+`com.heppsu.scan`), и те се четяха като счетоводни данни. В счетоводна система
+празен екран с причина е по-добър от измислени числа.
+
+**Синхронизирането събира и обновява, не изхвърля.** Отчетът не дава един ред на
+(ден, приложение, държава, тип): Apple разделя по ценови нива и промо кодове,
+Google пише по транзакция (покупка, такса на Google, данък — три реда за една
+покупка). Редовете се събират по естествения ключ, а съществуващият ред се
+**обновява**, защото магазините преизчисляват отчетите: месечният отчет на
+Google расте всеки ден, Apple коригира ден със закъснение. `SyncResult` носи
+`imported`, `updated` и `duplicates` (непроменени).
+
+### Какво точно се тегли
+
+| Магазин | Източник | Бележка |
+|---|---|---|
+| App Store | `GET /v1/salesReports`, DAILY · SALES · SUMMARY · **версия 1_1** | gzip TSV. С `1_0` Apple връща 400, тоест нула реда при изправни ключове. `Developer Proceeds` е **за една бройка** и се умножава по `Units`. Абонаментите са `IAY`/`IA9`/`IAC` — проверяват се ПРЕДИ вътрешните покупки, иначе „IA“ ги поглъща. |
+| Google Play | кофата с отчетите в Google Cloud Storage | `earnings/earnings_YYYYMM_*.zip` (нетно, след края на месеца) или, за текущия месец, `sales/salesreport_YYYYMM.zip`. **И двата са ZIP с UTF-16LE CSV**, не CSV. Приложението е колоната **`Package ID`**; „Product id“ не съществува. Двата отчета не се четат заедно — описват едни и същи пари и биха удвоили месеца. |
+
+Достъпът до GCS е през JSON API-то с подписан токен (PyJWT RS256), не през
+`google-cloud-storage` — пакетът не е зависимост на проекта и го нямаше в
+production образа. Затова `requirements.txt` иска **`pyjwt[crypto]`**: без
+`cryptography` PyJWT вдига `NotImplementedError` и ES256 (Apple) и RS256
+(Google) не се подписват — точно това беше състоянието в production, тоест
+реалните конектори не са могли да работят дори с ключове.
+
+### Настройки
+
+```
+STORE_PROVIDER=auto            # auto | live | stub
+APPLE_ISSUER_ID=               # App Store Connect → Users and Access → Integrations
+APPLE_KEY_ID=
+APPLE_PRIVATE_KEY_PATH=/app/secrets/AuthKey_XXXXXXXXXX.p8
+APPLE_VENDOR_NUMBER=           # Payments and Financial Reports, номерът горе вляво
+GOOGLE_PLAY_BUCKET=            # pubsite_prod_rev_<номер> (Play Console → Download reports)
+GOOGLE_APPLICATION_CREDENTIALS=/app/secrets/play-service-account.json
+```
+
+Ключовете живеят в `/srv/aifos/<среда>/secrets/` (700, файловете 600), **извън
+`release/`**, за да преживеят `rsync --delete` при деплой, и се монтират в
+контейнера като `/app/secrets` само за четене.
+
+Маршрути: `GET /stores/status` (режимът на всеки магазин) ·
+`POST /stores/{platform}/sync?date_from&date_to` · `GET /stores/sales` ·
+`GET /stores/analytics`. Права: `stores.view` и `stores.sync`.
+
 ## Тестове
 
 ```bash

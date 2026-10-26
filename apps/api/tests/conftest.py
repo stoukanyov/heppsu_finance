@@ -27,6 +27,9 @@ os.environ["SECRET_KEY"] = "test-secret-key"
 os.environ["ENVIRONMENT"] = "test"
 os.environ["DOCUMENT_STORAGE_DIR"] = str(_DOCS_DIR)
 os.environ["AI_PROVIDER"] = "stub"  # детерминиран AI, без мрежа
+# Магазините: подставените данни вече искат ИЗРИЧЕН stub. „auto“ без ключове
+# не измисля продажби, а отказва — виж tests/test_stores.py.
+os.environ["STORE_PROVIDER"] = "stub"
 # Тестовете логват многократно от един и същ „IP“ — ограничението се включва
 # точково само в тестовете, които го проверяват (виж tests/test_rate_limit.py).
 os.environ["RATE_LIMIT_ENABLED"] = "false"

@@ -60,10 +60,18 @@ Deimos 5,0 GB от 96 GB, 1,2 GB от 7,8 GB, натоварване 0,64. Мо�
 ```
 /srv/aifos/<env>/
 ├── .env        тайни (600) — извън release/, за да преживее rsync --delete
+├── secrets/    ключове към магазините (700, файловете 600)
 ├── release/    кодът, разархивиран от git таг
 ├── storage/    оригиналните сканирани документи
 └── backups/    дъмпове на базата
 ```
+
+`secrets/` се монтира в контейнера като `/app/secrets` само за четене и носи
+`AuthKey_XXXXXXXXXX.p8` (App Store Connect) и `play-service-account.json`
+(достъп до кофата с отчетите на Google Play). Пътищата в `.env`
+(`APPLE_PRIVATE_KEY_PATH`, `GOOGLE_APPLICATION_CREDENTIALS`) сочат към
+`/app/secrets/...`, не към пътя на хоста. Директорията е извън `release/` по
+същата причина като `.env`: деплоят я трие.
 
 ## Достъп
 

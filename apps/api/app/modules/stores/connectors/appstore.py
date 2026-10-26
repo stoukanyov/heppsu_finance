@@ -22,12 +22,23 @@ _API = "https://api.appstoreconnect.apple.com/v1/salesReports"
 _AUDIENCE = "appstoreconnect-v1"
 
 
+# Product Type Identifier от отчета на Apple. Абонаментите се проверяват ПРЕДИ
+# вътрешните покупки: кодовете им също започват с „IA“ и затова преди 26.10.2026
+# всеки абонамент се записваше като вътрешна покупка — проверката `startswith("IA")`
+# стоеше първа и редът след нея беше недостижим за IAY/IA9/IAC.
+#   IA1 · вътрешна покупка        IA9 · абонамент без подновяване
+#   IAY · подновяващ се абонамент IAC · безплатен абонамент
+#   1, 1T, 1F, F1 · приложение (платено/безплатно, iPhone/iPad)
+_SUBSCRIPTION_CODES = frozenset({"IA9", "IAY", "IAC"})
+_IN_APP_CODES = frozenset({"IA1"})
+
+
 def _product_type(code: str) -> StoreProductType:
-    code = (code or "").upper()
-    if code.startswith("IA"):
-        return StoreProductType.IN_APP
-    if "SUBSCRIPTION" in code or code in ("F1", "IAY", "IAC"):
+    code = (code or "").strip().upper()
+    if code in _SUBSCRIPTION_CODES or "SUBSCRIPTION" in code:
         return StoreProductType.SUBSCRIPTION
+    if code in _IN_APP_CODES or code.startswith("IA"):
+        return StoreProductType.IN_APP
     return StoreProductType.APP
 
 
@@ -51,7 +62,10 @@ class AppStoreConnector(StoreConnector):
             "filter[reportSubType]": "SUMMARY",
             "filter[vendorNumber]": settings.APPLE_VENDOR_NUMBER,
             "filter[reportDate]": day.isoformat(),
-            "filter[version]": "1_0",
+            # 1_1 е текущата версия на DAILY SALES/SUMMARY. С „1_0“ Apple връща
+            # 400 „report version is invalid“ — тоест нула реда при напълно
+            # изправни ключове. Control Center тегли същия отчет с 1_1.
+            "filter[version]": "1_1",
         }
         resp = client.get(
             _API, params=params,

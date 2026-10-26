@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.modules.companies.models import Company
-from app.modules.stores.connectors.factory import get_connector
+from app.modules.stores.connectors.factory import StoreNotConnected, get_connector
 from app.modules.stores.models import StorePlatform, StoreSale
 from app.modules.stores.schemas import (
     NamedTotal,
@@ -30,41 +30,85 @@ def sync_sales(
 ) -> SyncResult:
     if date_to < date_from:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Крайната дата е преди началната")
-    connector = get_connector(platform)
+    try:
+        connector = get_connector(platform)
+    except StoreNotConnected as exc:
+        # 409, а не подставени данни: по-добре празен екран с причина, отколкото
+        # измислени приходи в счетоводна система.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     data = connector.fetch_sales(date_from, date_to)
 
-    existing = {
-        ref for (ref,) in db.execute(
-            select(StoreSale.source_ref).where(StoreSale.company_id == company.id)
-        )
-    }
-    imported = duplicates = 0
-    total = ZERO
+    # 1. Събиране по естествения ключ. Отчетът на магазина НЕ дава един ред на
+    #    (ден, приложение, държава, тип): Apple разделя по ценови нива, промо
+    #    кодове и пред-заявки, а отчетът на Google е по отделна транзакция.
+    #    Докато конекторът беше подставен, редовете бяха точно по един и затова
+    #    старият код просто пропускаше повторенията като „дубликати“ — върху
+    #    реален отчет това губеше приходи.
+    sabrani: dict[str, dict] = {}
     for row in data:
         ref = row.source_ref()
-        total += row.proceeds
-        if ref in existing:
-            duplicates += 1
+        gnezdo = sabrani.get(ref)
+        if gnezdo is None:
+            sabrani[ref] = {
+                "row": row,
+                "units": row.units,
+                "proceeds": row.proceeds,
+                "currency": row.currency,
+            }
             continue
-        existing.add(ref)
-        db.add(StoreSale(
-            company_id=company.id,
-            platform=row.platform,
-            report_date=row.report_date,
-            app_name=row.app_name,
-            app_identifier=row.app_identifier,
-            product_type=row.product_type,
-            country=row.country,
-            units=row.units,
-            proceeds=row.proceeds,
-            currency=row.currency,
-            source_ref=ref,
-        ))
-        imported += 1
+        gnezdo["units"] += row.units
+        gnezdo["proceeds"] += row.proceeds
+        # Безплатното изтегляне в отчета на Apple идва без валута („Currency of
+        # Proceeds“ е празна). Първият такъв ред не бива да остави реда без
+        # валута, щом друг ред за същия ден я носи.
+        if not gnezdo["currency"] and row.currency:
+            gnezdo["currency"] = row.currency
+
+    # 2. Записване. Съществуващият ред се ОБНОВЯВА, а не се пропуска: магазините
+    #    преизчисляват отчетите (месечният отчет на Google расте всеки ден, Apple
+    #    коригира ден със закъснение). Със старото пропускане първото
+    #    синхронизиране на месеца заковаваше числата му завинаги.
+    nalichni = {
+        s.source_ref: s for s in db.scalars(
+            select(StoreSale).where(StoreSale.company_id == company.id)
+        )
+    }
+    imported = updated = unchanged = 0
+    total = ZERO
+    for ref, gnezdo in sabrani.items():
+        row = gnezdo["row"]
+        units = gnezdo["units"]
+        proceeds = Decimal(gnezdo["proceeds"]).quantize(Decimal("0.01"))
+        total += proceeds
+        nalichen = nalichni.get(ref)
+        if nalichen is None:
+            db.add(StoreSale(
+                company_id=company.id,
+                platform=row.platform,
+                report_date=row.report_date,
+                app_name=row.app_name,
+                app_identifier=row.app_identifier,
+                product_type=row.product_type,
+                country=row.country,
+                units=units,
+                proceeds=proceeds,
+                currency=gnezdo["currency"],
+                source_ref=ref,
+            ))
+            imported += 1
+            continue
+        if nalichen.units == units and nalichen.proceeds == proceeds:
+            unchanged += 1
+            continue
+        nalichen.units = units
+        nalichen.proceeds = proceeds
+        nalichen.currency = gnezdo["currency"] or nalichen.currency
+        nalichen.app_name = row.app_name
+        updated += 1
     db.commit()
     return SyncResult(
         platform=platform, date_from=date_from, date_to=date_to,
-        fetched=len(data), imported=imported, duplicates=duplicates,
+        fetched=len(data), imported=imported, updated=updated, duplicates=unchanged,
         total_proceeds=total.quantize(Decimal("0.01")),
     )
 

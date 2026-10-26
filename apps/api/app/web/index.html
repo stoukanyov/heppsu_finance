@@ -2268,27 +2268,42 @@ async function viewStores(main){
   const now=new Date(); const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   const from=iso(new Date(now.getFullYear(),now.getMonth()-2,1)), to=iso(now);
   let st={}; try{ st=await api('/stores/status'); }catch{}
-  const modePill = st.provider==='live' ? '<span class="pill s-green">Live · свързан</span>' : '<span class="pill s-amber">Демо данни (stub)</span>';
+  // Режимът е НА МАГАЗИН: с един ключ по-рано пишеше „Live · свързан“ и за
+  // несвързания магазин, а при липса на ключове — „Демо данни“, макар вече
+  // никакви данни да не се измислят.
+  const plats = st.platforms || {};
+  const REZHIM = {live:['s-green','свързан'], stub:['s-amber','демо данни'], off:['s-red','не е свързан']};
+  const pill = (name,key)=>{ const [cls,txt]=REZHIM[plats[key]]||REZHIM.off; return `<span class="pill ${cls}">${name} · ${txt}</span>`; };
+  const modePill = pill('App Store','APP_STORE')+' '+pill('Google Play','GOOGLE_PLAY');
   main.innerHTML=pageH('Магазини · App Store / Google Play','Продажби, най-добри приложения и държави',modePill)+`
     <div class="card" style="margin-bottom:16px;"><div class="row">
       <div class="field"><label>Магазин</label><select id="s-plat"><option value="APP_STORE">App Store</option><option value="GOOGLE_PLAY">Google Play</option><option value="BOTH">И двата</option></select></div>
       <div class="field"><label>От дата</label><input id="s-from" type="date" value="${from}"/></div>
       <div class="field"><label>До дата</label><input id="s-to" type="date" value="${to}"/></div>
       <button id="s-sync" class="primary">${ic('download')}Синхронизирай</button>
-      <div class="hint" style="align-self:center;">${st.provider==='live'?'Тегли реални данни от API-тата.':'Без конфигурирани ключове — показва демо данни. Добави APPLE_* / GOOGLE_* в средата за реални.'}</div>
+      <div class="hint" style="align-self:center;">${(()=>{ const off=Object.entries(plats).filter(([,v])=>v==='off').map(([k])=>k==='APP_STORE'?'App Store':'Google Play');
+        if(!off.length) return plats.APP_STORE==='stub'?'Демо данни — средата е с STORE_PROVIDER=stub.':'Тегли реални данни от отчетите на магазините.';
+        return `${off.join(' и ')}: няма ключове в средата, затова няма и данни. Нищо не се измисля — синхронизирането ще откаже с причината.`; })()}</div>
     </div></div>
     <div id="s-body">${loading()}</div>`;
   document.getElementById('s-sync').onclick=async()=>{
     const plat=document.getElementById('s-plat').value, f=document.getElementById('s-from').value, t=document.getElementById('s-to').value;
     const plats = plat==='BOTH'?['APP_STORE','GOOGLE_PLAY']:[plat];
     document.getElementById('s-sync').disabled=true;
-    try{ let imp=0; for(const p of plats){ const r=await api(`/stores/${p}/sync?date_from=${f}&date_to=${t}`,{method:'POST'}); imp+=r.imported; } toast(`Синхронизирани ${imp} нови реда`); loadStores(); }
+    try{ let imp=0, upd=0; const gresh=[];
+      for(const p of plats){
+        try{ const r=await api(`/stores/${p}/sync?date_from=${f}&date_to=${t}`,{method:'POST'}); imp+=r.imported; upd+=(r.updated||0); }
+        catch(e){ gresh.push(e.message); }   // един несвързан магазин не отменя другия
+      }
+      if(gresh.length) toast(gresh.join(' · '),true);
+      else toast(`Нови редове: ${imp}` + (upd?` · обновени: ${upd}`:''));
+      loadStores(); }
     catch(e){ toast(e.message,true); } finally{ document.getElementById('s-sync').disabled=false; } };
   const loadStores=async()=>{
     const box=document.getElementById('s-body'); box.innerHTML=loading();
     try{
       const a=await api('/stores/analytics');
-      if(!a.total_units){ box.innerHTML=`<div class="card">${empty('Няма данни още. Натисни „Синхронизирай", за да заредиш продажби.')}</div>`; return; }
+      if(!a.total_units && !Number(a.total_proceeds)){ box.innerHTML=`<div class="card">${empty('Няма данни още. Натисни „Синхронизирай", за да заредиш продажби от отчетите на магазините.')}</div>`; return; }
       const cur=a.currency;
       const kpi=(l,v,icon,cls)=>`<div class="card kpi"><div class="top"><div><div class="l">${l}</div><div class="v">${v}</div></div><div class="chip ${cls}">${ic(icon)}</div></div></div>`;
       const barTable=(items,unit)=>{ const mx=Math.max(...items.map(i=>Number(i.proceeds)),1);

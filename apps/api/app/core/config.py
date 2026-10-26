@@ -15,6 +15,10 @@ DEFAULT_SECRET_KEY = "dev-secret-change-me"
 MIN_SECRET_KEY_BYTES = 32
 # Среди, в които изискваме „истинска“ конфигурация.
 PRODUCTION_ENVIRONMENTS = frozenset({"production", "prod", "staging"})
+# Среди, в които подставени данни за магазините са забранени на всяка цена —
+# дори при изрично `STORE_PROVIDER=stub`. „staging“ НЕ е тук нарочно: демо
+# средата е staging и живее от показни данни.
+STUB_FORBIDDEN_ENVIRONMENTS = frozenset({"production", "prod"})
 # Подписваме със споделен таен ключ → само симетрични алгоритми. „none“ никога.
 ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
 # Препоръчителен живот на access токена, след като всички клиенти ползват /auth/refresh.
@@ -142,12 +146,51 @@ class Settings(BaseSettings):
     GOOGLE_APPLICATION_CREDENTIALS: str = ""  # път до service account JSON
 
     @property
+    def apple_configured(self) -> bool:
+        """App Store Connect: трите неща, без които няма подписан токен."""
+        return bool(self.APPLE_ISSUER_ID and self.APPLE_KEY_ID and self.APPLE_PRIVATE_KEY_PATH)
+
+    @property
+    def google_play_configured(self) -> bool:
+        """Google Play: кофата с отчетите и service account-ът, който я чете."""
+        return bool(self.GOOGLE_PLAY_BUCKET and self.GOOGLE_APPLICATION_CREDENTIALS)
+
+    def store_provider_for(self, platform: str) -> str:
+        """Режимът за ЕДИН магазин: „live“, „stub“ или „off“.
+
+        Беше една обща стойност за двата магазина и даваше „live“, щом е
+        конфигуриран кой да е от двата — тоест синхронизирането на Google Play
+        тръгваше към реалния конектор само защото Apple има ключ, и се чупеше в
+        него. Режимът е на магазин, защото ключовете са на магазин.
+
+        „off“ значи „няма ключове“ и НЕ е „покажи измислени числа“: `auto`
+        никога не връща `stub`. Подставените данни искат изрично
+        `STORE_PROVIDER=stub` (демо средата), защото на 26.10.2026 production
+        носеше 1305 реда измислени продажби на приложения, които не съществуват,
+        и те изглеждаха като счетоводни данни.
+        """
+        izbran = (self.STORE_PROVIDER or "auto").strip().lower()
+        if izbran == "stub":
+            if self.ENVIRONMENT.strip().lower() in STUB_FORBIDDEN_ENVIRONMENTS:
+                return "off"
+            return "stub"
+        if izbran == "live":
+            return "live"
+        # auto
+        konfiguriran = {
+            "APP_STORE": self.apple_configured,
+            "GOOGLE_PLAY": self.google_play_configured,
+        }.get(str(platform).upper(), False)
+        return "live" if konfiguriran else "off"
+
+    @property
     def resolved_store_provider(self) -> str:
-        if self.STORE_PROVIDER != "auto":
-            return self.STORE_PROVIDER
-        has_apple = bool(self.APPLE_ISSUER_ID and self.APPLE_KEY_ID and self.APPLE_PRIVATE_KEY_PATH)
-        has_google = bool(self.GOOGLE_PLAY_BUCKET and self.GOOGLE_APPLICATION_CREDENTIALS)
-        return "live" if (has_apple or has_google) else "stub"
+        """Общ режим за екрана: „live“, ако поне един магазин е свързан."""
+        rezhimi = {self.store_provider_for(p) for p in ("APP_STORE", "GOOGLE_PLAY")}
+        for rezhim in ("live", "stub", "off"):
+            if rezhim in rezhimi:
+                return rezhim
+        return "off"
 
     # ---- Мобилен клиент ----
     # Версията, под която приложението спира да работи. Проверката е на сървъра,

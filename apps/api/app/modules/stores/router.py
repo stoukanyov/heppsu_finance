@@ -14,11 +14,20 @@ router = APIRouter(prefix="/stores", tags=["stores"])
 
 @router.get("/status")
 def stores_status(ctx: CurrentCompany) -> dict:
-    """Показва режима (live/stub) и кои магазини са конфигурирани."""
+    """Режимът на ВСЕКИ магазин поотделно.
+
+    Беше една обща стойност и екранът показваше „Live · свързан“, щом е
+    конфигуриран кой да е от двата магазина — тоест и за несвързания.
+    `provider` остава за съвместимост (най-силният от двата режима).
+    """
+    po_magazin = {
+        p.value: settings.store_provider_for(p.value) for p in StorePlatform
+    }
     return {
         "provider": settings.resolved_store_provider,
-        "apple_configured": bool(settings.APPLE_ISSUER_ID and settings.APPLE_PRIVATE_KEY_PATH),
-        "google_configured": bool(settings.GOOGLE_PLAY_BUCKET and settings.GOOGLE_APPLICATION_CREDENTIALS),
+        "platforms": po_magazin,
+        "apple_configured": settings.apple_configured,
+        "google_configured": settings.google_play_configured,
     }
 
 
