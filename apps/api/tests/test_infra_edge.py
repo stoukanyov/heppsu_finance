@@ -673,3 +673,22 @@ def test_adresat_se_sverqva_pri_vseki_deploy_a_ne_samo_pri_sazdavaneto():
     assert "AIFOS_BIND=${BIND}" in sled_fi.split("\nREMOTE", 1)[0], (
         "AIFOS_BIND се пише само при създаване на .env — живите среди остават на 0.0.0.0"
     )
+
+
+def test_deployat_sverqva_che_klyuchovete_se_vizhdat_v_konteynera():
+    """Сложени, но невидими ключове се казват при деплоя, не след 500 в лога.
+
+    27.10.2026: `/srv/aifos/prod/secrets/` носеше ключовете от 26.10, живият
+    контейнер беше от издание преди монтирането на обема, и единственото
+    място, където това се виждаше, беше traceback в лога на production.
+    """
+    s = (INFRA / "deploy.sh").read_text(encoding="utf-8")
+    assert "/app/secrets" in s, "деплоят не проверява монтирания обем със ключовете"
+    assert "${REMOTE_DIR}/secrets" in s
+    # Проверката е СЛЕД health gate: по-рано контейнерът още не е вдигнат.
+    assert s.index("Проверявам здравето") < s.index("/app/secrets")
+
+
+def test_compose_montira_klyuchovete_samo_za_chetene():
+    s = (INFRA / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "./secrets:/app/secrets:ro" in s

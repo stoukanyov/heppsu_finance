@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from app.api.deps import CurrentCompany, DbSession, require
 from app.core.config import settings
 from app.modules.stores import service
+from app.modules.stores.connectors.factory import prichina_za_nesvarzan
 from app.modules.stores.models import StorePlatform
 from app.modules.stores.schemas import StoreAnalyticsOut, StoreSaleOut, SyncResult
 
@@ -23,9 +24,18 @@ def stores_status(ctx: CurrentCompany) -> dict:
     po_magazin = {
         p.value: settings.store_provider_for(p.value) for p in StorePlatform
     }
+    # Причината за всеки несвързан магазин идва със статуса, а не само при
+    # натискане на „Синхронизирай“: на 27.10.2026 екранът пишеше „свързан“,
+    # ключът липсваше и единственият начин да се види защо беше 500 в лога.
+    prichini = {
+        key: prichina_za_nesvarzan(StorePlatform(key))
+        for key, rezhim in po_magazin.items()
+        if rezhim == "off"
+    }
     return {
         "provider": settings.resolved_store_provider,
         "platforms": po_magazin,
+        "reasons": prichini,
         "apple_configured": settings.apple_configured,
         "google_configured": settings.google_play_configured,
     }

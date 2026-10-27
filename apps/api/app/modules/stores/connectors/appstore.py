@@ -48,8 +48,15 @@ class AppStoreConnector(StoreConnector):
     def _jwt(self) -> str:
         import jwt  # PyJWT
 
-        with open(settings.APPLE_PRIVATE_KEY_PATH, encoding="utf-8") as fh:
-            private_key = fh.read()
+        from app.modules.stores.connectors.factory import StoreNotConnected
+
+        try:
+            with open(settings.APPLE_PRIVATE_KEY_PATH, encoding="utf-8") as fh:
+                private_key = fh.read()
+        except OSError as exc:
+            # Нечетим ключ е „магазинът не е свързан“, а не вътрешна грешка:
+            # 27.10.2026 това беше 500 с FileNotFoundError в лога на production.
+            raise StoreNotConnected(self.platform) from exc
         now = int(time.time())
         payload = {"iss": settings.APPLE_ISSUER_ID, "iat": now, "exp": now + 900, "aud": _AUDIENCE}
         headers = {"kid": settings.APPLE_KEY_ID, "typ": "JWT"}

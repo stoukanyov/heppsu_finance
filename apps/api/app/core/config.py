@@ -28,6 +28,30 @@ ALLOWED_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
 RECOMMENDED_ACCESS_TOKEN_MINUTES = 15
 
 
+def chetim_fayl(pat: str) -> bool:
+    """Дали на този път има файл, който наистина се отваря за четене.
+
+    Ключът към магазин е ФАЙЛ (.p8 за Apple, service account JSON за Google), а
+    настройката е само пътят до него. Зададен път не значи наличен ключ: на
+    27.10.2026 в production трите настройки на Apple бяха налице, обемът
+    `secrets` не беше монтиран в контейнера, `apple_configured` връщаше True,
+    екранът показваше „свързан“ и всяко синхронизиране завършваше с 500 и
+    `FileNotFoundError` от дълбочината на конектора.
+
+    Отварянето е самата проверка, не `os.path.exists`: файл без права за
+    четене, прекъсната символна връзка и директория на мястото на ключа също
+    не са ключ, а само отварянето ги отсява и трите.
+    """
+    if not pat:
+        return False
+    try:
+        with open(pat, "rb") as fh:
+            fh.read(1)
+    except OSError:
+        return False
+    return True
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
@@ -153,13 +177,24 @@ class Settings(BaseSettings):
 
     @property
     def apple_configured(self) -> bool:
-        """App Store Connect: трите неща, без които няма подписан токен."""
-        return bool(self.APPLE_ISSUER_ID and self.APPLE_KEY_ID and self.APPLE_PRIVATE_KEY_PATH)
+        """App Store Connect: идентификаторите, доставчикът и ЧЕТИМИЯТ ключ.
+
+        `APPLE_VENDOR_NUMBER` е в проверката, защото без него Apple връща 400
+        за всеки отчет — тоест „свързан“ магазин, който не може да изтегли ред.
+        """
+        return bool(
+            self.APPLE_ISSUER_ID
+            and self.APPLE_KEY_ID
+            and self.APPLE_VENDOR_NUMBER
+            and chetim_fayl(self.APPLE_PRIVATE_KEY_PATH)
+        )
 
     @property
     def google_play_configured(self) -> bool:
-        """Google Play: кофата с отчетите и service account-ът, който я чете."""
-        return bool(self.GOOGLE_PLAY_BUCKET and self.GOOGLE_APPLICATION_CREDENTIALS)
+        """Google Play: кофата с отчетите и ЧЕТИМИЯТ service account JSON."""
+        return bool(
+            self.GOOGLE_PLAY_BUCKET and chetim_fayl(self.GOOGLE_APPLICATION_CREDENTIALS)
+        )
 
     def store_provider_for(self, platform: str) -> str:
         """Режимът за ЕДИН магазин: „live“, „stub“ или „off“.

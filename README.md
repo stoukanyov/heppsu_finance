@@ -159,8 +159,8 @@ alembic revision --autogenerate -m "описание"   # нова миграц�
 
 | Доставчик | Режим | Настроен при | Без настройка |
 |---|---|---|---|
-| App Store | `store_provider_for("APP_STORE")` | `APPLE_ISSUER_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY_PATH` | 409 |
-| Google Play | `store_provider_for("GOOGLE_PLAY")` | `GOOGLE_PLAY_BUCKET`, `GOOGLE_APPLICATION_CREDENTIALS` | 409 |
+| App Store | `store_provider_for("APP_STORE")` | `APPLE_ISSUER_ID`, `APPLE_KEY_ID`, `APPLE_VENDOR_NUMBER` + **четим файл** на `APPLE_PRIVATE_KEY_PATH` | 409 |
+| Google Play | `store_provider_for("GOOGLE_PLAY")` | `GOOGLE_PLAY_BUCKET` + **четим файл** на `GOOGLE_APPLICATION_CREDENTIALS` | 409 |
 | Банки (PSD2) | `bank_provider` | `GOCARDLESS_SECRET_ID`, `GOCARDLESS_SECRET_KEY` | 409 |
 | AI (Anthropic) | `ai_provider` | `ANTHROPIC_API_KEY` | 409 |
 
@@ -255,6 +255,22 @@ GOOGLE_APPLICATION_CREDENTIALS=/app/secrets/play-service-account.json
 Ключовете живеят в `/srv/aifos/<среда>/secrets/` (700, файловете 600), **извън
 `release/`**, за да преживеят `rsync --delete` при деплой, и се монтират в
 контейнера като `/app/secrets` само за четене.
+
+**Ключът е файл, не настройка.** `apple_configured` и `google_play_configured`
+проверяват дали файлът на пътя се ОТВАРЯ (`config.chetim_fayl`), не дали пътят
+е зададен. На 27.10.2026, 22:10, production върна пет 500-ки при
+синхронизиране на App Store: четирите настройки на Apple бяха зададени,
+`/srv/aifos/prod/secrets/` носеше ключовете от 26.10, но живият контейнер беше
+от издание преди монтирането на обема и в него `/app/secrets` не съществуваше.
+Проверката гледаше настройките, затова режимът беше `live`, екранът показваше
+„App Store · свързан“, а `FileNotFoundError` излизаше от дълбочината на
+конектора като 500 с traceback. Сега зададен път без четим файл е `off`,
+`GET /stores/status` носи причината в `reasons`, а синхронизирането отказва с
+409 и пътя в текста. Нечетим ключ по време на самото изтегляне (размонтиран
+обем, деплой в движение) също е 409, не 500.
+
+`APPLE_VENDOR_NUMBER` е в проверката, защото без него App Store Connect връща
+400 за всеки отчет — „свързан“ магазин, който не може да изтегли нито един ред.
 
 Маршрути: `GET /stores/status` (режимът на всеки магазин) ·
 `POST /stores/{platform}/sync?date_from&date_to` · `GET /stores/sales` ·

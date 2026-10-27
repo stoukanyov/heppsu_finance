@@ -93,16 +93,23 @@ def test_auto_bez_klyuchove_ne_vrushta_podstaveni_danni():
     assert s.store_provider_for("GOOGLE_PLAY") == "off"
 
 
-def test_rezhimut_e_na_magazin_a_ne_obsht():
+def test_rezhimut_e_na_magazin_a_ne_obsht(tmp_path):
     """С ключ само за Apple, Google Play НЕ е „live“.
 
     Старото правило беше `live if (has_apple or has_google)`: синхронизирането
     на Google Play тръгваше към реалния конектор само защото Apple има ключ, и
-    падаше вътре в него.
+    се чупеше вътре в него.
+
+    Ключът е истински файл: дотогава тестът ползваше несъществуващия
+    „/tmp/k.p8“ и беше зелен точно върху дефекта от 27.10.2026 — зададен път
+    без файл се броеше за свързан магазин.
     """
+    klyuch = tmp_path / "AuthKey_TEST.p8"
+    klyuch.write_text("-----BEGIN PRIVATE KEY-----\nproba\n-----END PRIVATE KEY-----\n")
     s = _nastroiki(
         STORE_PROVIDER="auto",
-        APPLE_ISSUER_ID="iss", APPLE_KEY_ID="kid", APPLE_PRIVATE_KEY_PATH="/tmp/k.p8",
+        APPLE_ISSUER_ID="iss", APPLE_KEY_ID="kid", APPLE_PRIVATE_KEY_PATH=str(klyuch),
+        APPLE_VENDOR_NUMBER="87654321",
     )
     assert s.store_provider_for("APP_STORE") == "live"
     assert s.store_provider_for("GOOGLE_PLAY") == "off"
@@ -147,14 +154,19 @@ def test_sync_na_nesvurzan_magazin_e_409(client, monkeypatch):
     assert client.get(f"{ST}/sales", headers=h).json() == []
 
 
-def test_status_kazva_rezhima_na_vseki_magazin(client, monkeypatch):
+def test_status_kazva_rezhima_na_vseki_magazin(client, monkeypatch, tmp_path):
     from app.modules.stores import router as stores_router
 
+    klyuch = tmp_path / "AuthKey_TEST.p8"
+    klyuch.write_text("-----BEGIN PRIVATE KEY-----\nproba\n-----END PRIVATE KEY-----\n")
     h = _setup(client, "st-status2@example.com")
     monkeypatch.setattr(stores_router.settings, "STORE_PROVIDER", "auto", raising=False)
     monkeypatch.setattr(stores_router.settings, "APPLE_ISSUER_ID", "iss", raising=False)
     monkeypatch.setattr(stores_router.settings, "APPLE_KEY_ID", "kid", raising=False)
-    monkeypatch.setattr(stores_router.settings, "APPLE_PRIVATE_KEY_PATH", "/tmp/k.p8", raising=False)
+    monkeypatch.setattr(stores_router.settings, "APPLE_VENDOR_NUMBER", "87654321", raising=False)
+    monkeypatch.setattr(
+        stores_router.settings, "APPLE_PRIVATE_KEY_PATH", str(klyuch), raising=False
+    )
     s = client.get(f"{ST}/status", headers=h).json()
     assert s["platforms"] == {"APP_STORE": "live", "GOOGLE_PLAY": "off"}
 

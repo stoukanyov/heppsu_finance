@@ -2286,7 +2286,10 @@ async function viewStores(main){
       <button id="s-sync" class="primary">${ic('download')}Синхронизирай</button>
       <div class="hint" style="align-self:center;">${(()=>{ const off=Object.entries(plats).filter(([,v])=>v==='off').map(([k])=>k==='APP_STORE'?'App Store':'Google Play');
         if(!off.length) return plats.APP_STORE==='stub'?'Демо данни — средата е с STORE_PROVIDER=stub.':'Тегли реални данни от отчетите на магазините.';
-        return `${off.join(' и ')}: няма ключове в средата, затова няма и данни. Нищо не се измисля — синхронизирането ще откаже с причината.`; })()}</div>
+        // Причината идва от сървъра: „няма ключове“ беше предположение и при
+        // зададен, но нечетим ключ пращаше в грешната посока.
+        const pr=Object.entries(st.reasons||{}).map(([k,v])=>`${k==='APP_STORE'?'App Store':'Google Play'}: ${esc(v)}`);
+        return (pr.length?pr.join(' · '):`${off.join(' и ')}: няма ключове в средата`)+'. Нищо не се измисля — синхронизирането ще откаже с причината.'; })()}</div>
     </div></div>
     <div id="s-body">${loading()}</div>`;
   document.getElementById('s-sync').onclick=async()=>{

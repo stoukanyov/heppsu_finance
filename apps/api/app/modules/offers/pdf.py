@@ -79,6 +79,10 @@ _STATUS_LABELS = {
 
 
 def _first_existing(candidates: list[str], *, required: bool) -> str | None:
+    # `PDF_FONT_PATH` е НАКРАЯ нарочно, обратно на фактурите: там шрифтът е един,
+    # а тук са четири роли (sans, sans-bold, serif, serif-bold). Ако зададеният
+    # файл печелеше, и четирите щяха да сочат него — оформлението по сайта губи
+    # serif-а и болда. Тук настройката е резервен вариант, не предпочитание.
     override = [settings.PDF_FONT_PATH] if settings.PDF_FONT_PATH else []
     for path in [*candidates, *override]:
         if path and Path(path).is_file():

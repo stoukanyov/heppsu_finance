@@ -5,6 +5,7 @@ import datetime as dt
 import uuid
 from decimal import Decimal
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,6 +20,18 @@ from app.modules.stores.schemas import (
 )
 
 ZERO = Decimal("0.00")
+# Отговорът на магазина в съобщението е отрязан: достатъчно, за да се види
+# причината („Report version is invalid“, „Forbidden“), без да залива екрана.
+MAX_OTGOVOR = 300
+
+
+def _otgovor_na_magazina(exc: httpx.HTTPError) -> str:
+    """Какво точно отговори магазинът — код и начало на тялото."""
+    otgovor = getattr(exc, "response", None)
+    if otgovor is None:
+        return f"магазинът не отговори ({exc})"
+    tyalo = (otgovor.text or "").strip().replace("\n", " ")[:MAX_OTGOVOR]
+    return f"магазинът отговори {otgovor.status_code}" + (f" — {tyalo}" if tyalo else "")
 
 
 def sync_sales(
@@ -32,11 +45,22 @@ def sync_sales(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Крайната дата е преди началната")
     try:
         connector = get_connector(platform)
+        # Изтеглянето е в същия `try`: ключът може да изчезне и МЕЖДУ проверката
+        # и четенето му (деплой, размонтиран обем със secrets). Иначе това е
+        # 500 с traceback вместо същата причина, изписана на екрана.
+        data = connector.fetch_sales(date_from, date_to)
     except StoreNotConnected as exc:
         # 409, а не подставени данни: по-добре празен екран с причина, отколкото
         # измислени приходи в счетоводна система.
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
-    data = connector.fetch_sales(date_from, date_to)
+    except httpx.HTTPError as exc:
+        # Магазинът е свързан, но отговаря с грешка (изтекъл ключ, сгрешен
+        # vendor number, кофа без права, прекъсната мрежа). Това е 502 с кода и
+        # отговора на магазина, а не 500: иначе на екрана остава „Internal
+        # Server Error“ и причината живее само в traceback на сървъра.
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"{platform.value}: {_otgovor_na_magazina(exc)}"
+        ) from exc
 
     # 1. Събиране по естествения ключ. Отчетът на магазина НЕ дава един ред на
     #    (ден, приложение, държава, тип): Apple разделя по ценови нива, промо

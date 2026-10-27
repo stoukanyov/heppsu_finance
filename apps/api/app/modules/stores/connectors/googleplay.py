@@ -199,8 +199,13 @@ class GooglePlayConnector(StoreConnector):
 
         import jwt  # PyJWT[crypto] — RS256
 
-        with open(settings.GOOGLE_APPLICATION_CREDENTIALS, encoding="utf-8") as fh:
-            info = json.loads(fh.read())
+        from app.modules.stores.connectors.factory import StoreNotConnected
+
+        try:
+            with open(settings.GOOGLE_APPLICATION_CREDENTIALS, encoding="utf-8") as fh:
+                info = json.loads(fh.read())
+        except OSError as exc:
+            raise StoreNotConnected(self.platform) from exc
         now = int(time.time())
         assertion = jwt.encode(
             {
