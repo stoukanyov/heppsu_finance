@@ -32,7 +32,7 @@ NUZHNI_NASTROYKI = {
     StorePlatform.APP_STORE: {
         "APPLE_ISSUER_ID": "идентификатор на издателя в App Store Connect",
         "APPLE_KEY_ID": "идентификатор на ключа",
-        "APPLE_VENDOR_NUMBER": "номер на доставчика (за Sales Reports)",
+        "APPLE_VENDOR_NUMBER": "номерът на доставчика за Sales Reports",
     },
     StorePlatform.GOOGLE_PLAY: {
         "GOOGLE_PLAY_BUCKET": "кофата pubsite_prod_rev_… с отчетите",
@@ -40,7 +40,7 @@ NUZHNI_NASTROYKI = {
 }
 # Настройката, която носи ПЪТЯ до ключа, и какво е той.
 NUZHEN_KLYUCH = {
-    StorePlatform.APP_STORE: ("APPLE_PRIVATE_KEY_PATH", "частният ключ .p8"),
+    StorePlatform.APP_STORE: ("APPLE_PRIVATE_KEY_PATH", "ключа .p8"),
     StorePlatform.GOOGLE_PLAY: (
         "GOOGLE_APPLICATION_CREDENTIALS",
         "service account JSON с достъп до кофата",
@@ -75,7 +75,7 @@ def prichina_za_nesvarzan(platform: StorePlatform) -> str:
         prichini.append("задай в средата: " + ", ".join(lipsvashti))
     if pat and not chetim_fayl(pat):
         prichini.append(
-            f"файлът с ключа ({kakvo}) не се чете на пътя от {ime_na_klyucha}: {pat}"
+            f"файлът с {kakvo} не се чете на пътя от {ime_na_klyucha}: {pat}"
         )
     return "; ".join(prichini) or "няма ключове"
 
