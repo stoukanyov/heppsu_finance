@@ -120,9 +120,14 @@ services:
     image: nginx:1.30.5-alpine
     restart: unless-stopped
     logging: *default-logging
+    # Адресът, на който портът виси, е на средата. Production е публичен;
+    # preprod и demo се връзват за loopback (AIFOS_BIND=127.0.0.1), защото
+    # нямат име и сертификат, а 0.0.0.0 ги изнасяше по гол HTTP навън.
+    # По подразбиране е 0.0.0.0: липсващ ред в .env не бива да затваря
+    # production пред света.
     ports:
-      - "${AIFOS_HTTP_PORT:-80}:80"
-      - "${AIFOS_HTTPS_PORT:-443}:443"
+      - "${AIFOS_BIND:-0.0.0.0}:${AIFOS_HTTP_PORT:-80}:80"
+      - "${AIFOS_BIND:-0.0.0.0}:${AIFOS_HTTPS_PORT:-443}:443"
     volumes:
       - ./release/infra/nginx/conf.d:/etc/nginx/conf.d:ro
       # Конфигурация, специфична за средата (именувани хостове, TLS). Директорията

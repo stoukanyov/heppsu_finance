@@ -39,11 +39,14 @@ die()  { printf '\n\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 # preprod“ не бива да зависи от това какво е било в AIFOS_HOST в тази обвивка.
 case "$ENV_NAME" in
     prod)    SSH_CANDIDATES="phobos-deploy heppsu-deploy deploy@169.58.72.254"
-             HTTP_PORT=80;   HTTPS_PORT=443;  WORKERS=4; APP_ENV=production ;;
+             HTTP_PORT=80;   HTTPS_PORT=443;  WORKERS=4; APP_ENV=production
+             BIND=0.0.0.0 ;;
     preprod) SSH_CANDIDATES="deimos-deploy deploy@169.58.90.87"
-             HTTP_PORT=8080; HTTPS_PORT=8443; WORKERS=2; APP_ENV=staging ;;
+             HTTP_PORT=8080; HTTPS_PORT=8443; WORKERS=2; APP_ENV=staging
+             BIND=127.0.0.1 ;;
     demo)    SSH_CANDIDATES="deimos-deploy deploy@169.58.90.87"
-             HTTP_PORT=8081; HTTPS_PORT=8444; WORKERS=1; APP_ENV=staging ;;
+             HTTP_PORT=8081; HTTPS_PORT=8444; WORKERS=1; APP_ENV=staging
+             BIND=127.0.0.1 ;;
     *) die "употреба: $0 {preprod|demo|prod} [git-ref] [комит, одобрен от Ив]" ;;
 esac
 
@@ -274,7 +277,7 @@ scp -q "$TARBALL" "${HOST}:${REMOTE_DIR}/release.tar.gz"
 
 # ─────────────────── 2. Тайни (само при първо създаване на средата) ───────────
 log "Проверявам .env"
-ssh "$HOST" ENV_NAME="$ENV_NAME" REMOTE_DIR="$REMOTE_DIR" \
+ssh "$HOST" ENV_NAME="$ENV_NAME" REMOTE_DIR="$REMOTE_DIR" BIND="$BIND" \
     HTTP_PORT="$HTTP_PORT" HTTPS_PORT="$HTTPS_PORT" WORKERS="$WORKERS" APP_ENV="$APP_ENV" \
     bash -euo pipefail <<'REMOTE'
 cd "$REMOTE_DIR"
@@ -310,6 +313,17 @@ else
     chmod 600 .env
     echo "  ВАЖНО: ANTHROPIC_API_KEY, CORS_ORIGINS, COCKPIT_URL и COCKPIT_APP_TOKEN остават за попълване на ръка"
 fi
+
+# Адресът на порта се сверява при ВСЕКИ деплой, не само при създаването на .env.
+# Иначе средите, създадени преди този ред, биха останали на 0.0.0.0 завинаги —
+# а файлът щеше да изглежда настроен. Стойността е изведена от името на средата,
+# не е тайна и не е избор на машината.
+if grep -q "^AIFOS_BIND=" .env; then
+    sed -i "s|^AIFOS_BIND=.*|AIFOS_BIND=${BIND}|" .env
+else
+    echo "AIFOS_BIND=${BIND}" >> .env
+fi
+echo "  портът виси на ${BIND}"
 REMOTE
 
 # ───────────────────── 3. Дъмп ПРЕДИ каквато и да е миграция ──────────────────

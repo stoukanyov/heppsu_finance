@@ -628,3 +628,48 @@ def test_preprod_i_demo_bez_ime_prodalzhavat_po_ip(edge):
         assert status == 200, (host, body)
         assert "6.6.6.6" not in body
         assert headers["Server"] == "nginx"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Портовете на preprod и demo висят на loopback (27.10.2026)
+# ──────────────────────────────────────────────────────────────────────────────
+# Същият одит, същото правило: никой порт навън без DNS+TLS. preprod и demo
+# нямат име и сертификат, а compose ги вдигаше на `8080:80` — тоест 0.0.0.0,
+# публичен HTTP. Открито, защото сесията на Control Center спря двата nginx-а;
+# със спрян nginx health gate-ът на deploy.sh (той бие 127.0.0.1:8080) обявява
+# всеки деплой за провален. Затова адресът е на средата, а не изхвърлен.
+def test_preprod_i_demo_visyat_samo_na_loopback():
+    """Средите без име и сертификат не се вдигат на 0.0.0.0."""
+    text = DEPLOY_SH.read_text()
+    for sreda in ("preprod", "demo"):
+        blok = re.search(rf"^    {sreda}\)(?:.*\n)*?.*?;;", text, re.M)
+        assert blok, f"няма блок за средата {sreda} в deploy.sh"
+        assert "BIND=127.0.0.1" in blok.group(0), f"{sreda} не е вързан за loopback"
+
+
+def test_production_ostava_publichen():
+    """Обратната грешка е по-скъпа: затворен production не се вижда отвън."""
+    blok = re.search(r"^    prod\)(?:.*\n)*?.*?;;", DEPLOY_SH.read_text(), re.M)
+    assert blok and "BIND=0.0.0.0" in blok.group(0)
+
+
+def test_compose_vrazva_porta_kam_adres_s_bezopasna_podrazbirashta_stoynost():
+    """Липсващ ред в .env не бива да затваря production пред света."""
+    text = COMPOSE.read_text()
+    for port in ("AIFOS_HTTP_PORT:-80", "AIFOS_HTTPS_PORT:-443"):
+        assert f'"${{AIFOS_BIND:-0.0.0.0}}:${{{port}}}' in text, port
+
+
+def test_adresat_se_sverqva_pri_vseki_deploy_a_ne_samo_pri_sazdavaneto():
+    """Средите, създадени преди този ред, също се поправят.
+
+    Записването само в блока „създавам .env“ би оставило живите preprod и demo
+    на 0.0.0.0 завинаги, а файлът щеше да изглежда настроен — конфигурация,
+    която не е процес.
+    """
+    text = DEPLOY_SH.read_text()
+    sled_kraya_na_bootstrap = text.split('echo "  създавам .env с нови тайни"', 1)[1]
+    sled_fi = sled_kraya_na_bootstrap.split("\nfi\n", 1)[1]
+    assert "AIFOS_BIND=${BIND}" in sled_fi.split("\nREMOTE", 1)[0], (
+        "AIFOS_BIND се пише само при създаване на .env — живите среди остават на 0.0.0.0"
+    )
