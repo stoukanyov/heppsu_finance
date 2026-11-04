@@ -344,7 +344,7 @@ def check_store_text(repo: Path) -> None:
         if not re.search(r"https://\S+(terms|privacy)", desc):
             no("правна връзка в описанието", f"{f.name}: няма https://…terms/privacy (M3, A5)")
         # A4, но в описанието: чужда азбука издава копи-пейст от друг език.
-        # Намерено на живо в японското описание на Calctera (25.09.2026).
+        # Намерено на живо в японското описание на My Construction Buddy (25.09.2026).
         lang = str(t.get("language", f.stem))
         if lang not in CYRILLIC_LANGS and CYRILLIC.search(blob):
             no("кирилица в чуждоезично описание",
