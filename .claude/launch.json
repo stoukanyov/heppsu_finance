@@ -1,0 +1,34 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "subscriptions",
+      "url": "http://localhost:8096",
+      "port": 8096
+    },
+    {
+      "name": "groomelle-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "/private/tmp/claude-501/-Users-iv-Documents-Development-Business-Partner/2a7beeca-813d-4271-b78f-fd795cbaacff/scratchpad/wt-rel/apps/web", "run", "dev", "--", "--port", "5183"],
+      "port": 5183
+    },
+    {
+      "name": "cockpit-mlw-store-dev",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd '/private/tmp/claude-501/-Users-iv-Documents-Development-Business-Partner/2a7beeca-813d-4271-b78f-fd795cbaacff/scratchpad/cp-mlw-store' && COCKPIT_DATA_DIR='/private/tmp/claude-501/-Users-iv-Documents-Development-Business-Partner/2a7beeca-813d-4271-b78f-fd795cbaacff/scratchpad/cockpit-dev-data-3' COCKPIT_ENVIRONMENT=dev COCKPIT_COOKIE_SECURE=false COCKPIT_DISABLE_COLLECTOR=true COCKPIT_ADMIN_PASSWORD_HASH='$2b$12$Bmdkl9EH8N.XG/kxF0bgMOZN8nsx9JGO.9hOfwjhlgcYUI9HKjjMa' /Users/iv/Documents/Development/Cockpit/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8099"],
+      "port": 8099
+    },
+    {
+      "name": "cockpit-stores-ui-dev",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd '/private/tmp/claude-501/-Users-iv-Documents-Development-Business-Partner/2a7beeca-813d-4271-b78f-fd795cbaacff/scratchpad/cp-stores-ui' && COCKPIT_DATA_DIR='/private/tmp/claude-501/-Users-iv-Documents-Development-Business-Partner/2a7beeca-813d-4271-b78f-fd795cbaacff/scratchpad/cockpit-dev-data-stores-ui' COCKPIT_ENVIRONMENT=dev COCKPIT_COOKIE_SECURE=false COCKPIT_DISABLE_COLLECTOR=true COCKPIT_ADMIN_PASSWORD_HASH='$2b$12$4DrKH44X0mB7vvG7ckeXC.drJEDQJGrln/BccqFBXWKyKGmmy4C7C' /Users/iv/Documents/Development/Cockpit/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8098"],
+      "port": 8098
+    },
+    {
+      "name": "my-beagle-web",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd '/Users/iv/Documents/Development/MyBeagle' && flutter run -d web-server --web-port 5500 --dart-define=API_BASE_URL=https://mybeagle.heppsu.com/api/v1"],
+      "port": 5500
+    }
+  ]
+}
